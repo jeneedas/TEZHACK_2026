@@ -1,5 +1,7 @@
 import 'dotenv/config';
 import { Telegraf, Markup } from 'telegraf';
+import { db } from './firebase.js';
+import { FieldValue } from 'firebase-admin/firestore';
 
 import {
   startReport,
@@ -132,11 +134,11 @@ For example:
 // DESCRIPTION
 // --------------------------------------------------
 
-bot.on('text', async (ctx) => {
+bot.on('text', async (ctx, next) => {
   const report = getReport(ctx.chat.id);
 
   if (!report || report.step !== 'description') {
-    return;
+    return next();
   }
 
   const text = ctx.message.text.trim();
@@ -242,6 +244,7 @@ Submit this report?`,
 // --------------------------------------------------
 
 bot.hears('Submit Report', async (ctx) => {
+  console.log('SUBMIT REPORT BUTTON PRESSED');
   const report = getReport(ctx.chat.id);
 
   if (!report || report.step !== 'confirm') {
@@ -250,21 +253,55 @@ bot.hears('Submit Report', async (ctx) => {
 
   const reportId = createReportId();
 
-  console.log('--------------------------------');
-  console.log('NEW ZIVA REPORT');
-  console.log('Report ID:', reportId);
-  console.log('Type:', report.type);
-  console.log('Latitude:', report.latitude);
-  console.log('Longitude:', report.longitude);
-  console.log('Description:', report.description);
-  console.log('Photo:', report.photoId ? 'YES' : 'NO');
-  console.log('Status: UNVERIFIED');
-  console.log('--------------------------------');
+  try {
+    // Save the report to Firestore
+    await db.collection('reports').doc(reportId).set({
+      reportId,
 
-  clearReport(ctx.chat.id);
+      // What happened
+      type: report.type,
+      description: report.description,
 
-  await ctx.reply(
-    `REPORT SUBMITTED
+      // Location
+      latitude: report.latitude,
+      longitude: report.longitude,
+
+      // Evidence
+      photoId: report.photoId ?? null,
+
+      // ZIVA verification state
+      verificationStatus: 'UNVERIFIED',
+
+      // Report lifecycle
+      status: 'SUBMITTED',
+
+      // Source
+      source: 'TELEGRAM',
+
+      // Citizen reference
+      telegramUserId: String(ctx.from.id),
+
+      // Server timestamps
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+
+    console.log('--------------------------------');
+    console.log('NEW ZIVA REPORT');
+    console.log('Report ID:', reportId);
+    console.log('Type:', report.type);
+    console.log('Latitude:', report.latitude);
+    console.log('Longitude:', report.longitude);
+    console.log('Description:', report.description);
+    console.log('Photo:', report.photoId ? 'YES' : 'NO');
+    console.log('Status: UNVERIFIED');
+    console.log('Saved to Firestore: YES');
+    console.log('--------------------------------');
+
+    clearReport(ctx.chat.id);
+
+    await ctx.reply(
+      `REPORT SUBMITTED
 
 Report ID
 ${reportId}
@@ -275,13 +312,25 @@ UNVERIFIED
 Your report has been recorded and can now be reviewed by ZIVA coordinators.
 
 Please keep your Report ID for tracking.`,
-    mainMenu()
-  );
+      mainMenu()
+    );
+
+  } catch (error) {
+    console.error('Failed to save ZIVA report:', error);
+
+    await ctx.reply(
+      `We could not save your report right now.
+
+Please try submitting it again.`,
+      confirmationKeyboard()
+    );
+  }
 });
 
 // --------------------------------------------------
 // CANCEL
 // --------------------------------------------------
+
 
 bot.hears('Cancel', async (ctx) => {
   clearReport(ctx.chat.id);
