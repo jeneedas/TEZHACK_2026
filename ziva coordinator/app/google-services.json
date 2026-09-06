@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "230169291662",
+    "project_id": "ziva-96f35",
+    "storage_bucket": "ziva-96f35.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:230169291662:android:9d8ff8d0ef03c26ddf12df",
+        "android_client_info": {
+          "package_name": "com.aistudio.ziva.disaster"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCkeLupZ4yDP3HPpzaV_WwGFrq8bUdee7c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
