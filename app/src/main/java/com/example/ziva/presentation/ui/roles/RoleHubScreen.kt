@@ -1,5 +1,12 @@
 package com.example.ziva.presentation.ui.roles
 
+import androidx.compose.ui.graphics.vector.ImageVector
+
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,13 +26,13 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.HealthAndSafety
 import androidx.compose.material.icons.filled.LocalShipping
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.VolunteerActivism
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -46,6 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.platform.LocalContext
 import com.example.ui.theme.ZivaAccent
 import com.example.ui.theme.ZivaBackground
 import com.example.ui.theme.ZivaPrimary
@@ -162,6 +170,10 @@ private fun RoleSelectionScreen(
             onClick = onProvider
         )
 
+        Spacer(modifier = Modifier.height(16.dp))
+
+        ZivaBotCard()
+
         Spacer(modifier = Modifier.weight(1f))
 
         Button(
@@ -183,6 +195,125 @@ private fun RoleSelectionScreen(
 
 
 // ================================================================
+// ZIVABOT
+// ================================================================
+
+@Composable
+private fun ZivaBotCard() {
+
+    val context = LocalContext.current
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = ZivaSurface
+        )
+    ) {
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+
+            Box(
+                modifier = Modifier
+                    .size(50.dp)
+                    .clip(RoundedCornerShape(15.dp))
+                    .background(
+                        ZivaPrimary.copy(alpha = 0.14f)
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SmartToy,
+                    contentDescription = "ZivaBot",
+                    tint = ZivaPrimary,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(
+                modifier = Modifier.weight(1f)
+            ) {
+
+                Text(
+                    text = "ZivaBot",
+                    color = ZivaText,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Black
+                )
+
+                Spacer(modifier = Modifier.height(3.dp))
+
+                Text(
+                    text = "AI disaster assistant on Telegram",
+                    color = ZivaSecondary,
+                    fontSize = 10.sp
+                )
+            }
+
+            Button(
+                onClick = {
+                    openZivaBot(context)
+                },
+                shape = RoundedCornerShape(11.dp),
+                contentPadding = PaddingValues(
+                    horizontal = 12.dp,
+                    vertical = 8.dp
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.SmartToy,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp)
+                )
+
+                Spacer(modifier = Modifier.width(5.dp))
+
+                Text(
+                    text = "CHAT",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+private fun openZivaBot(context: Context) {
+
+    val botUri = Uri.parse(
+        "https://t.me/Ziva_DisasterBot"
+    )
+
+    try {
+        val telegramIntent = Intent(
+            Intent.ACTION_VIEW,
+            botUri
+        ).apply {
+            setPackage("org.telegram.messenger")
+        }
+
+        context.startActivity(telegramIntent)
+
+    } catch (_: ActivityNotFoundException) {
+
+        val browserIntent = Intent(
+            Intent.ACTION_VIEW,
+            botUri
+        )
+
+        context.startActivity(browserIntent)
+    }
+}
+
+
+// ================================================================
 // ROLE CARD
 // ================================================================
 
@@ -190,7 +321,7 @@ private fun RoleSelectionScreen(
 private fun RoleCard(
     title: String,
     description: String,
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     buttonText: String,
     onClick: () -> Unit
 ) {
@@ -965,7 +1096,7 @@ private fun ProviderIncidentCard(
 
 @Composable
 private fun ProviderRequirement(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    icon: ImageVector,
     title: String,
     value: String
 ) {

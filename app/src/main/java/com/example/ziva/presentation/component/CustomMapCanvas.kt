@@ -1,144 +1,141 @@
 package com.example.ziva.presentation.component
 
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.draw.clip
-
+import androidx.compose.ui.unit.sp
 import com.example.ziva.data.local.ResourceEntity
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.MapProperties
-import com.google.maps.android.compose.MapType
-import com.google.maps.android.compose.MapUiSettings
-import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.MarkerState
-import com.google.maps.android.compose.rememberCameraPositionState
 
 @Composable
 fun CustomMapCanvas(
     modifier: Modifier = Modifier,
-    userPos: Pair<Float, Float> = Pair(0.5f, 0.65f),
-    helperPos: Pair<Float, Float>? = null,
-    resources: List<ResourceEntity> = emptyList(),
-    onMarkerClick: ((String) -> Unit)? = null
+    userPos: Pair<Float, Float>,
+    resources: List<ResourceEntity>,
+    onMarkerClick: () -> Unit
 ) {
 
-    /*
-     * Default center: Tezpur, Assam
-     *
-     * Later we will replace this with the user's
-     * real GPS coordinates from TelemetryManager.
-     */
-    val defaultLocation = LatLng(
-        26.6520,
-        92.7926
-    )
-
-    val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(
-            defaultLocation,
-            13f
-        )
-    }
-
-    val mapUiSettings = remember {
-        MapUiSettings(
-            zoomControlsEnabled = true,
-            compassEnabled = true,
-            myLocationButtonEnabled = false,
-            mapToolbarEnabled = false
-        )
-    }
-
-    val mapProperties = remember {
-        MapProperties(
-            mapType = MapType.NORMAL
-        )
-    }
-
-    GoogleMap(
+    Box(
         modifier = modifier
-            .fillMaxSize()
-            .clip(RoundedCornerShape(16.dp)),
-        cameraPositionState = cameraPositionState,
-        uiSettings = mapUiSettings,
-        properties = mapProperties
+            .background(Color(0xFFE8F0E8))
+            .clickable {
+                if (resources.isNotEmpty()) {
+                    onMarkerClick()
+                }
+            }
     ) {
 
-        /*
-         * USER LOCATION
-         *
-         * Temporary fixed Tezpur location.
-         * We will connect this to the phone's
-         * actual GPS next.
-         */
-        Marker(
-            state = MarkerState(position = defaultLocation),
-            title = "Your Location",
-            snippet = "ZIVA user",
-            icon = BitmapDescriptorFactory.defaultMarker(
-                BitmapDescriptorFactory.HUE_CYAN
-            )
-        )
+        Canvas(
+            modifier = Modifier.fillMaxSize()
+        ) {
 
-        /*
-         * RESOURCE MARKERS
-         *
-         * IMPORTANT:
-         * Your current ResourceEntity needs actual
-         * latitude/longitude fields for these to
-         * represent real locations.
-         *
-         * Until we inspect ResourceEntity, these
-         * markers are not generated from resource
-         * coordinates yet.
-         */
-        resources.take(20).forEachIndexed { index, resource ->
+            // Map-style background grid
+            val gridColor = Color(0xFFCFDCCF)
 
-            /*
-             * Temporary demonstration positions
-             * around Tezpur.
-             *
-             * We will replace these with:
-             *
-             * LatLng(
-             *     resource.latitude,
-             *     resource.longitude
-             * )
-             */
-            val position = LatLng(
-                defaultLocation.latitude +
-                        ((index % 5) - 2) * 0.004,
-                defaultLocation.longitude +
-                        ((index / 5) - 2) * 0.004
-            )
+            for (x in 0..10) {
+                val xPos = size.width * x / 10f
 
-            val markerColor = when (resource.type) {
-                "WATER" -> BitmapDescriptorFactory.HUE_AZURE
-                "FOOD" -> BitmapDescriptorFactory.HUE_ORANGE
-                "MEDICINE" -> BitmapDescriptorFactory.HUE_RED
-                "SHELTER" -> BitmapDescriptorFactory.HUE_VIOLET
-                else -> BitmapDescriptorFactory.HUE_GREEN
+                drawLine(
+                    color = gridColor,
+                    start = Offset(xPos, 0f),
+                    end = Offset(xPos, size.height),
+                    strokeWidth = 2f
+                )
             }
 
-            Marker(
-                state = MarkerState(position = position),
-                title = resource.name,
-                snippet = "${resource.type} • ${resource.availability} ${resource.unit}",
-                icon = BitmapDescriptorFactory.defaultMarker(markerColor),
-                onClick = {
-                    onMarkerClick?.invoke(resource.resourceId)
-                    true
-                }
+            for (y in 0..10) {
+                val yPos = size.height * y / 10f
+
+                drawLine(
+                    color = gridColor,
+                    start = Offset(0f, yPos),
+                    end = Offset(size.width, yPos),
+                    strokeWidth = 2f
+                )
+            }
+
+            // Roads
+            drawLine(
+                color = Color.White,
+                start = Offset(0f, size.height * 0.35f),
+                end = Offset(size.width, size.height * 0.55f),
+                strokeWidth = 18f
+            )
+
+            drawLine(
+                color = Color.White,
+                start = Offset(size.width * 0.25f, 0f),
+                end = Offset(size.width * 0.65f, size.height),
+                strokeWidth = 14f
+            )
+
+            // Resource markers
+            resources.forEachIndexed { index, _ ->
+
+                val x =
+                    size.width * (0.15f + (index % 4) * 0.22f)
+
+                val y =
+                    size.height * (0.25f + (index % 3) * 0.22f)
+
+                drawCircle(
+                    color = Color(0xFFE85D75),
+                    radius = 13f,
+                    center = Offset(x, y)
+                )
+
+                drawCircle(
+                    color = Color.White,
+                    radius = 5f,
+                    center = Offset(x, y)
+                )
+            }
+
+            // User location
+            drawCircle(
+                color = Color(0xFF2878D8),
+                radius = 17f,
+                center = Offset(
+                    size.width * userPos.first,
+                    size.height * userPos.second
+                )
+            )
+
+            drawCircle(
+                color = Color.White,
+                radius = 7f,
+                center = Offset(
+                    size.width * userPos.first,
+                    size.height * userPos.second
+                )
             )
         }
+
+        Text(
+            text = "LIVE RELIEF MAP",
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(12.dp),
+            color = Color(0xFF26352B),
+            fontSize = 11.sp
+        )
+
+        Text(
+            text = "${resources.size} relief points",
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(12.dp),
+            color = Color(0xFF26352B),
+            fontSize = 11.sp
+        )
     }
 }

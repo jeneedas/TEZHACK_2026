@@ -97,14 +97,12 @@ googleServices {
 
 dependencies {
 
+  // =========================================================
+  // COMPOSE
+  // =========================================================
+
   implementation(platform(libs.androidx.compose.bom))
 
-  // Firebase
-  implementation(platform(libs.firebase.bom))
-  implementation(libs.firebase.ai)
-  implementation(libs.firebase.firestore)
-
-  // AndroidX
   implementation(libs.androidx.activity.compose)
   implementation(libs.androidx.compose.material.icons.core)
   implementation(libs.androidx.compose.material.icons.extended)
@@ -112,8 +110,20 @@ dependencies {
   implementation(libs.androidx.compose.ui)
   implementation(libs.androidx.compose.ui.graphics)
   implementation(libs.androidx.compose.ui.tooling.preview)
-  implementation(libs.androidx.core.ktx)
 
+  // =========================================================
+  // FIREBASE
+  // =========================================================
+
+  implementation(platform(libs.firebase.bom))
+  implementation(libs.firebase.ai)
+  implementation(libs.firebase.firestore)
+
+  // =========================================================
+  // ANDROIDX
+  // =========================================================
+
+  implementation(libs.androidx.core.ktx)
   implementation(libs.androidx.datastore.preferences)
 
   implementation(libs.androidx.lifecycle.runtime.compose)
@@ -122,33 +132,62 @@ dependencies {
 
   implementation(libs.androidx.navigation.compose)
 
-  // Room
+  // =========================================================
+  // ROOM
+  // =========================================================
+
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
 
-  // Networking
+  // =========================================================
+  // NETWORKING
+  // =========================================================
+
   implementation(libs.converter.moshi)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
   implementation(libs.retrofit)
 
-  // Firebase App Check
+  // =========================================================
+  // FIREBASE APP CHECK
+  // =========================================================
+
   implementation(libs.firebase.appcheck.recaptcha)
   implementation(libs.firebase.appcheck.debug)
 
-  // Coroutines
+  // =========================================================
+  // COROUTINES
+  // =========================================================
+
   implementation(libs.kotlinx.coroutines.android)
   implementation(libs.kotlinx.coroutines.core)
 
-  // Location
+  // =========================================================
+  // LOCATION
+  // =========================================================
+
   implementation(libs.play.services.location)
+
+  // =========================================================
+  // GOOGLE MAPS
+  // =========================================================
+  // Kept because these were already part of the project.
+  // No Ramani / MapLibre dependency.
+  // =========================================================
+
   implementation(libs.play.services.maps)
   implementation(libs.maps.compose)
 
-  // Logging
+  // =========================================================
+  // LOGGING
+  // =========================================================
+
   implementation(libs.logging.interceptor)
 
-  // Tests
+  // =========================================================
+  // UNIT TESTS
+  // =========================================================
+
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)
@@ -159,7 +198,10 @@ dependencies {
   testImplementation(libs.roborazzi.compose)
   testImplementation(libs.roborazzi.junit.rule)
 
-  // Android tests
+  // =========================================================
+  // ANDROID TESTS
+  // =========================================================
+
   androidTestImplementation(
     platform(libs.androidx.compose.bom)
   )
@@ -180,7 +222,10 @@ dependencies {
     libs.androidx.runner
   )
 
-  // Debug
+  // =========================================================
+  // DEBUG
+  // =========================================================
+
   debugImplementation(
     libs.androidx.compose.ui.test.manifest
   )
@@ -189,7 +234,10 @@ dependencies {
     libs.androidx.compose.ui.tooling
   )
 
+  // =========================================================
   // KSP
+  // =========================================================
+
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }

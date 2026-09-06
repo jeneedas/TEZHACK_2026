@@ -1,6 +1,6 @@
 package com.example.ziva.presentation.ui.resources
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,7 +21,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Accessible
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.FilterList
@@ -37,30 +36,28 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
-import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 
-import com.example.ui.theme.ZivaAccent
 import com.example.ui.theme.ZivaBackground
 import com.example.ui.theme.ZivaBlueTint
 import com.example.ui.theme.ZivaCardBorderSubtle
@@ -68,12 +65,9 @@ import com.example.ui.theme.ZivaPrimary
 import com.example.ui.theme.ZivaSecondary
 import com.example.ui.theme.ZivaSurface
 import com.example.ui.theme.ZivaText
-import com.example.ui.theme.ZivaWarning
 
 import com.example.ziva.data.local.ResourceEntity
 import com.example.ziva.data.local.VolunteerEntity
-import com.example.ziva.presentation.component.CustomMapCanvas
-import com.example.ziva.presentation.component.FreshnessBadge
 import com.example.ziva.presentation.viewmodel.ZivaUiState
 
 
@@ -83,11 +77,8 @@ fun ResourceListMapScreen(
     uiState: ZivaUiState,
     resources: List<ResourceEntity>,
     volunteers: List<VolunteerEntity>,
-
-    // SAVE FOR LATER
     savedResourceIds: Set<String>,
     onToggleSaved: (String) -> Unit,
-
     onSelectCategory: (String) -> Unit,
     onToggleFreshOnly: () -> Unit,
     onToggleMapView: (Boolean) -> Unit,
@@ -96,242 +87,143 @@ fun ResourceListMapScreen(
     getString: (String) -> String
 ) {
 
-    // 0 = Resources
-    // 1 = Saved
-    // 2 = Volunteers
-    var subTab by remember {
-        mutableIntStateOf(0)
+    var selectedTab by remember { mutableIntStateOf(0) }
+
+    // IMPORTANT:
+    // Local state controls the map immediately.
+    // This avoids depending on ViewModel recomposition for the map toggle.
+    var showMap by remember {
+        mutableStateOf(uiState.isResourceMapView)
     }
 
-    val categories =
-        listOf(
-            "ALL",
-            "WATER",
-            "FOOD",
-            "MEDICINE",
-            "SHELTER"
-        )
+    val categories = listOf(
+        "ALL",
+        "WATER",
+        "FOOD",
+        "MEDICINE",
+        "SHELTER"
+    )
 
-    // ---------------------------------------------------------
-    // FILTERED RESOURCES
-    // ---------------------------------------------------------
+    val filteredResources = resources.filter { resource ->
 
-    val filteredResources =
-        resources.filter { res ->
+        val categoryMatches =
+            uiState.selectedResourceCategory == "ALL" ||
+                    resource.type.equals(
+                        uiState.selectedResourceCategory,
+                        ignoreCase = true
+                    )
 
-            val matchesCategory =
-                uiState.selectedResourceCategory == "ALL" ||
-                        res.type == uiState.selectedResourceCategory
+        val minutesAgo =
+            ((System.currentTimeMillis() - resource.lastUpdated)
+                    / 60000L)
+                .coerceAtLeast(0L)
 
-            val minutesAgo =
-                (
-                        System.currentTimeMillis() -
-                                res.lastUpdated
-                        ) / (60 * 1000)
+        val freshnessMatches =
+            !uiState.onlyFreshResources || minutesAgo <= 30
 
-            val matchesFresh =
-                !uiState.onlyFreshResources ||
-                        minutesAgo <= 30
-
-            matchesCategory && matchesFresh
-        }
-
-    // ---------------------------------------------------------
-    // SAVED RESOURCES
-    // ---------------------------------------------------------
+        categoryMatches && freshnessMatches
+    }
 
     val savedResources =
         resources.filter {
             it.resourceId in savedResourceIds
         }
 
-    // ---------------------------------------------------------
-    // MAIN SCREEN
-    // ---------------------------------------------------------
-
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(ZivaBackground)
-            .padding(top = 12.dp)
+            .padding(top = 8.dp)
     ) {
 
-        // =====================================================
-        // SUB TABS
-        // =====================================================
+        // =========================================================
+        // TABS
+        // =========================================================
 
         TabRow(
-            selectedTabIndex = subTab,
+            selectedTabIndex = selectedTab,
             containerColor = ZivaBackground,
-            contentColor = ZivaPrimary,
-
-            indicator = { tabPositions ->
-
-                TabRowDefaults.SecondaryIndicator(
-                    modifier =
-                        Modifier.tabIndicatorOffset(
-                            tabPositions[subTab]
-                        ),
-                    color = ZivaPrimary
-                )
-            },
-
-            modifier =
-                Modifier.padding(
-                    horizontal = 16.dp
-                )
+            contentColor = ZivaPrimary
         ) {
 
-            // -------------------------------------------------
-            // RESOURCES TAB
-            // -------------------------------------------------
-
             Tab(
-                selected = subTab == 0,
-                onClick = {
-                    subTab = 0
-                },
-
+                selected = selectedTab == 0,
+                onClick = { selectedTab = 0 },
                 text = {
-
                     Text(
-                        text =
-                            "Resources (${resources.size})",
-
+                        text = "Resources (${resources.size})",
+                        fontSize = 12.sp,
                         fontWeight =
-                            if (subTab == 0)
+                            if (selectedTab == 0)
                                 FontWeight.Bold
                             else
-                                FontWeight.Normal,
-
-                        color =
-                            if (subTab == 0)
-                                ZivaText
-                            else
-                                ZivaSecondary,
-
-                        fontSize = 12.sp
+                                FontWeight.Normal
                     )
                 }
             )
 
-            // -------------------------------------------------
-            // SAVED TAB
-            // -------------------------------------------------
-
             Tab(
-                selected = subTab == 1,
-                onClick = {
-                    subTab = 1
-                },
-
+                selected = selectedTab == 1,
+                onClick = { selectedTab = 1 },
                 text = {
-
                     Text(
-                        text =
-                            "Saved (${savedResources.size})",
-
+                        text = "Saved (${savedResources.size})",
+                        fontSize = 12.sp,
                         fontWeight =
-                            if (subTab == 1)
+                            if (selectedTab == 1)
                                 FontWeight.Bold
                             else
-                                FontWeight.Normal,
-
-                        color =
-                            if (subTab == 1)
-                                ZivaText
-                            else
-                                ZivaSecondary,
-
-                        fontSize = 12.sp
+                                FontWeight.Normal
                     )
                 }
             )
 
-            // -------------------------------------------------
-            // VOLUNTEERS TAB
-            // -------------------------------------------------
-
             Tab(
-                selected = subTab == 2,
-                onClick = {
-                    subTab = 2
-                },
-
+                selected = selectedTab == 2,
+                onClick = { selectedTab = 2 },
                 text = {
-
                     Text(
-                        text =
-                            "Volunteers (${volunteers.size})",
-
+                        text = "Volunteers (${volunteers.size})",
+                        fontSize = 12.sp,
                         fontWeight =
-                            if (subTab == 2)
+                            if (selectedTab == 2)
                                 FontWeight.Bold
                             else
-                                FontWeight.Normal,
-
-                        color =
-                            if (subTab == 2)
-                                ZivaText
-                            else
-                                ZivaSecondary,
-
-                        fontSize = 12.sp
+                                FontWeight.Normal
                     )
                 }
             )
         }
 
-        Spacer(
-            modifier = Modifier.height(10.dp)
-        )
+        Spacer(modifier = Modifier.height(10.dp))
 
 
-        // =====================================================
-        // RESOURCES
-        // =====================================================
+        // =========================================================
+        // RESOURCES TAB
+        // =========================================================
 
-        if (subTab == 0) {
-
-            // -------------------------------------------------
-            // FILTER BAR
-            // -------------------------------------------------
+        if (selectedTab == 0) {
 
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp),
-
-                horizontalArrangement =
-                    Arrangement.SpaceBetween,
-
-                verticalAlignment =
-                    Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
 
                 Row(
-                    verticalAlignment =
-                        Alignment.CenterVertically
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
 
                     Icon(
-                        imageVector =
-                            Icons.Default.FilterList,
-
-                        contentDescription =
-                            "Filter",
-
-                        tint =
-                            ZivaSecondary,
-
-                        modifier =
-                            Modifier.size(18.dp)
+                        imageVector = Icons.Default.FilterList,
+                        contentDescription = "Filter",
+                        tint = ZivaSecondary,
+                        modifier = Modifier.size(18.dp)
                     )
 
-                    Spacer(
-                        modifier =
-                            Modifier.width(6.dp)
-                    )
+                    Spacer(modifier = Modifier.width(6.dp))
 
                     Text(
                         text = "Relief Resources",
@@ -341,17 +233,9 @@ fun ResourceListMapScreen(
                     )
                 }
 
-                // ---------------------------------------------
-                // FRESH ONLY
-                // ---------------------------------------------
-
                 FilterChip(
-                    selected =
-                        uiState.onlyFreshResources,
-
-                    onClick =
-                        onToggleFreshOnly,
-
+                    selected = uiState.onlyFreshResources,
+                    onClick = onToggleFreshOnly,
                     label = {
                         Text(
                             text = "Fresh only",
@@ -359,190 +243,158 @@ fun ResourceListMapScreen(
                         )
                     }
                 )
+            }
 
-                // ---------------------------------------------
-                // LIST / MAP TOGGLE
-                // ---------------------------------------------
+            Spacer(modifier = Modifier.height(8.dp))
 
-                Row(
-                    modifier =
-                        Modifier
-                            .clip(
-                                RoundedCornerShape(8.dp)
-                            )
-                            .background(
+
+            // =====================================================
+            // LIST / MAP TOGGLE
+            // =====================================================
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.End
+            ) {
+
+                // LIST BUTTON
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (!showMap)
+                                ZivaPrimary
+                            else
                                 ZivaSurface
-                            )
-                            .border(
-                                1.dp,
-                                ZivaCardBorderSubtle,
-                                RoundedCornerShape(8.dp)
-                            )
+                        )
+                        .clickable {
+
+                            showMap = false
+
+                            // Keep ViewModel state in sync too.
+                            onToggleMapView(false)
+                        }
+                        .padding(
+                            horizontal = 10.dp,
+                            vertical = 7.dp
+                        )
                 ) {
 
-                    Box(
-                        modifier =
-                            Modifier
-                                .clip(
-                                    RoundedCornerShape(6.dp)
-                                )
-                                .background(
-                                    if (!uiState.isResourceMapView)
-                                        ZivaPrimary
-                                    else
-                                        Color.Transparent
-                                )
-                                .clickable {
-                                    onToggleMapView(false)
-                                }
-                                .padding(
-                                    horizontal = 8.dp,
-                                    vertical = 5.dp
-                                )
-                                .testTag(
-                                    "list_view_toggle"
-                                )
-                    ) {
+                    Icon(
+                        imageVector = Icons.Default.ViewList,
+                        contentDescription = "List View",
+                        tint =
+                            if (!showMap)
+                                Color.White
+                            else
+                                ZivaSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
 
-                        Icon(
-                            imageVector =
-                                Icons.Default.ViewList,
+                Spacer(modifier = Modifier.width(6.dp))
 
-                            contentDescription =
-                                "List View",
-
-                            tint =
-                                if (!uiState.isResourceMapView)
-                                    Color.White
-                                else
-                                    ZivaSecondary,
-
-                            modifier =
-                                Modifier.size(16.dp)
+                // MAP BUTTON
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (showMap)
+                                ZivaPrimary
+                            else
+                                ZivaSurface
                         )
-                    }
+                        .clickable {
 
-                    Box(
-                        modifier =
-                            Modifier
-                                .clip(
-                                    RoundedCornerShape(6.dp)
-                                )
-                                .background(
-                                    if (uiState.isResourceMapView)
-                                        ZivaPrimary
-                                    else
-                                        Color.Transparent
-                                )
-                                .clickable {
-                                    onToggleMapView(true)
-                                }
-                                .padding(
-                                    horizontal = 8.dp,
-                                    vertical = 5.dp
-                                )
-                                .testTag(
-                                    "map_view_toggle"
-                                )
-                    ) {
+                            // THIS DIRECTLY OPENS THE MAP.
+                            showMap = true
 
-                        Icon(
-                            imageVector =
-                                Icons.Default.Map,
-
-                            contentDescription =
-                                "Map View",
-
-                            tint =
-                                if (uiState.isResourceMapView)
-                                    Color.White
-                                else
-                                    ZivaSecondary,
-
-                            modifier =
-                                Modifier.size(16.dp)
+                            // Keep ViewModel state in sync too.
+                            onToggleMapView(true)
+                        }
+                        .padding(
+                            horizontal = 10.dp,
+                            vertical = 7.dp
                         )
-                    }
+                ) {
+
+                    Icon(
+                        imageVector = Icons.Default.Map,
+                        contentDescription = "Map View",
+                        tint =
+                            if (showMap)
+                                Color.White
+                            else
+                                ZivaSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
 
-            Spacer(
-                modifier = Modifier.height(10.dp)
-            )
+            Spacer(modifier = Modifier.height(8.dp))
 
 
-            // -------------------------------------------------
-            // CATEGORY CHIPS
-            // -------------------------------------------------
+            // =====================================================
+            // CATEGORY FILTERS
+            // =====================================================
 
             LazyRow(
-                modifier =
-                    Modifier.fillMaxWidth(),
-
+                modifier = Modifier.fillMaxWidth(),
                 contentPadding =
-                    PaddingValues(
-                        horizontal = 16.dp
-                    ),
-
+                    PaddingValues(horizontal = 16.dp),
                 horizontalArrangement =
                     Arrangement.spacedBy(8.dp)
             ) {
 
-                items(categories) { cat ->
+                items(categories) { category ->
 
-                    val isSelected =
-                        uiState.selectedResourceCategory == cat
-
-                    val chipBg =
-                        if (isSelected)
-                            ZivaBlueTint
-                        else
-                            ZivaSurface
-
-                    val chipBorder =
-                        if (isSelected)
-                            ZivaPrimary
-                        else
-                            ZivaCardBorderSubtle
-
-                    val chipTextColor =
-                        if (isSelected)
-                            ZivaPrimary
-                        else
-                            ZivaSecondary
+                    val selected =
+                        uiState.selectedResourceCategory
+                            .equals(
+                                category,
+                                ignoreCase = true
+                            )
 
                     Box(
-                        modifier =
-                            Modifier
-                                .clip(
-                                    RoundedCornerShape(14.dp)
-                                )
-                                .background(
-                                    chipBg
-                                )
-                                .border(
-                                    1.dp,
-                                    chipBorder,
-                                    RoundedCornerShape(14.dp)
-                                )
-                                .clickable {
-                                    onSelectCategory(cat)
-                                }
-                                .padding(
-                                    horizontal = 14.dp,
-                                    vertical = 7.dp
-                                )
-                                .testTag(
-                                    "category_chip_${cat.lowercase()}"
-                                )
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                if (selected)
+                                    ZivaBlueTint
+                                else
+                                    ZivaSurface
+                            )
+                            .border(
+                                width = 1.dp,
+                                color =
+                                    if (selected)
+                                        ZivaPrimary
+                                    else
+                                        ZivaCardBorderSubtle,
+                                shape =
+                                    RoundedCornerShape(16.dp)
+                            )
+                            .clickable {
+                                onSelectCategory(category)
+                            }
+                            .padding(
+                                horizontal = 14.dp,
+                                vertical = 7.dp
+                            )
                     ) {
 
                         Text(
-                            text = cat,
-                            color = chipTextColor,
-                            fontSize = 12.sp,
+                            text = category,
+                            color =
+                                if (selected)
+                                    ZivaPrimary
+                                else
+                                    ZivaSecondary,
+                            fontSize = 11.sp,
                             fontWeight =
-                                if (isSelected)
+                                if (selected)
                                     FontWeight.Bold
                                 else
                                     FontWeight.Medium
@@ -551,66 +403,28 @@ fun ResourceListMapScreen(
                 }
             }
 
-            Spacer(
-                modifier = Modifier.height(12.dp)
-            )
+            Spacer(modifier = Modifier.height(12.dp))
 
 
-            // -------------------------------------------------
+            // =====================================================
             // MAP VIEW
-            // -------------------------------------------------
+            // =====================================================
 
-            if (uiState.isResourceMapView) {
+            if (showMap) {
 
                 Column(
-                    modifier =
-                        Modifier
-                            .fillMaxSize()
-                            .padding(
-                                horizontal = 16.dp
-                            )
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp)
                 ) {
 
-                    Text(
-                        text =
-                            "Interactive Disaster Grid Map",
-
-                        color =
-                            ZivaSecondary,
-
-                        fontSize = 11.sp,
-
-                        fontWeight =
-                            FontWeight.SemiBold
-                    )
-
-                    Spacer(
-                        modifier =
-                            Modifier.height(6.dp)
-                    )
-
-                    CustomMapCanvas(
-
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .height(280.dp),
-
-                        userPos =
-                            Pair(
-                                0.5f,
-                                0.65f
-                            ),
-
-                        resources =
-                            filteredResources,
-
+                    // ACTUAL OFFLINE MAP
+                    ZivaDisasterMap(
+                        resources = filteredResources,
                         onMarkerClick = {
 
-                            if (
-                                filteredResources
-                                    .isNotEmpty()
-                            ) {
+                            if (filteredResources.isNotEmpty()) {
+
                                 onSelectResource(
                                     filteredResources.first()
                                 )
@@ -618,61 +432,50 @@ fun ResourceListMapScreen(
                         }
                     )
 
-                    Spacer(
-                        modifier =
-                            Modifier.height(12.dp)
-                    )
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     Text(
                         text =
-                            "Showing ${filteredResources.size} verified relief points",
-
-                        color =
-                            ZivaText,
-
+                            "${filteredResources.size} verified relief points",
+                        color = ZivaText,
                         fontSize = 13.sp,
-
-                        fontWeight =
-                            FontWeight.Bold
+                        fontWeight = FontWeight.Bold
                     )
 
-                    Spacer(
-                        modifier =
-                            Modifier.height(6.dp)
-                    )
+                    Spacer(modifier = Modifier.height(8.dp))
 
+                    // Resource list below map
                     LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
                         verticalArrangement =
-                            Arrangement.spacedBy(8.dp),
-
-                        modifier =
-                            Modifier.fillMaxSize()
+                            Arrangement.spacedBy(10.dp)
                     ) {
 
                         items(
                             filteredResources,
-                            key = {
-                                it.resourceId
-                            }
-                        ) { res ->
+                            key = { it.resourceId }
+                        ) { resource ->
 
                             ResourceCardItem(
-
-                                resource = res,
-
+                                resource = resource,
                                 isSaved =
-                                    res.resourceId in
-                                            savedResourceIds,
-
+                                    resource.resourceId
+                                            in savedResourceIds,
                                 onToggleSaved = {
                                     onToggleSaved(
-                                        res.resourceId
+                                        resource.resourceId
                                     )
                                 },
-
                                 onClick = {
-                                    onSelectResource(res)
+                                    onSelectResource(resource)
                                 }
+                            )
+                        }
+
+                        item {
+                            Spacer(
+                                modifier =
+                                    Modifier.height(20.dp)
                             )
                         }
                     }
@@ -680,167 +483,84 @@ fun ResourceListMapScreen(
 
             } else {
 
-                // -------------------------------------------------
+                // =================================================
                 // LIST VIEW
-                // -------------------------------------------------
+                // =================================================
 
                 LazyColumn(
-                    modifier =
-                        Modifier
-                            .fillMaxSize()
-                            .padding(
-                                horizontal = 16.dp
-                            ),
-
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 16.dp),
                     verticalArrangement =
                         Arrangement.spacedBy(10.dp)
                 ) {
 
                     items(
                         filteredResources,
-                        key = {
-                            it.resourceId
-                        }
-                    ) { res ->
+                        key = { it.resourceId }
+                    ) { resource ->
 
                         ResourceCardItem(
-
-                            resource = res,
-
+                            resource = resource,
                             isSaved =
-                                res.resourceId in
-                                        savedResourceIds,
-
+                                resource.resourceId
+                                        in savedResourceIds,
                             onToggleSaved = {
                                 onToggleSaved(
-                                    res.resourceId
+                                    resource.resourceId
                                 )
                             },
-
                             onClick = {
-                                onSelectResource(res)
+                                onSelectResource(resource)
                             }
                         )
                     }
 
                     item {
-
                         Spacer(
                             modifier =
-                                Modifier.height(16.dp)
+                                Modifier.height(20.dp)
                         )
                     }
                 }
             }
 
 
-            // =====================================================
-            // SAVED RESOURCES
-            // =====================================================
+            // =========================================================
+            // SAVED TAB
+            // =========================================================
 
-        } else if (subTab == 1) {
+        } else if (selectedTab == 1) {
 
             Column(
-                modifier =
-                    Modifier
-                        .fillMaxSize()
-                        .padding(
-                            horizontal = 16.dp
-                        )
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp)
             ) {
 
-                // Header
-
-                Row(
-                    modifier =
-                        Modifier.fillMaxWidth(),
-
-                    horizontalArrangement =
-                        Arrangement.SpaceBetween,
-
-                    verticalAlignment =
-                        Alignment.CenterVertically
-                ) {
-
-                    Column {
-
-                        Text(
-                            text =
-                                "Saved for Later",
-
-                            color =
-                                ZivaText,
-
-                            fontSize = 18.sp,
-
-                            fontWeight =
-                                FontWeight.Bold
-                        )
-
-                        Spacer(
-                            modifier =
-                                Modifier.height(2.dp)
-                        )
-
-                        Text(
-                            text =
-                                "Important relief records you've bookmarked",
-
-                            color =
-                                ZivaSecondary,
-
-                            fontSize = 11.sp
-                        )
-                    }
-
-                    Box(
-                        modifier =
-                            Modifier
-                                .size(40.dp)
-                                .clip(
-                                    RoundedCornerShape(12.dp)
-                                )
-                                .background(
-                                    ZivaBlueTint
-                                ),
-                        contentAlignment =
-                            Alignment.Center
-                    ) {
-
-                        Icon(
-                            imageVector =
-                                Icons.Default.Bookmark,
-
-                            contentDescription =
-                                "Saved",
-
-                            tint =
-                                ZivaPrimary,
-
-                            modifier =
-                                Modifier.size(20.dp)
-                        )
-                    }
-                }
-
-                Spacer(
-                    modifier =
-                        Modifier.height(14.dp)
+                Text(
+                    text = "Saved for Later",
+                    color = ZivaText,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold
                 )
 
+                Spacer(modifier = Modifier.height(4.dp))
+
+                Text(
+                    text =
+                        "Important relief records you've bookmarked",
+                    color = ZivaSecondary,
+                    fontSize = 11.sp
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
 
                 if (savedResources.isEmpty()) {
 
-                    // -------------------------------------------------
-                    // EMPTY STATE
-                    // -------------------------------------------------
-
                     Box(
-                        modifier =
-                            Modifier.fillMaxSize(),
-
-                        contentAlignment =
-                            Alignment.Center
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
                     ) {
 
                         Column(
@@ -851,33 +571,23 @@ fun ResourceListMapScreen(
                             Icon(
                                 imageVector =
                                     Icons.Default.BookmarkBorder,
-
-                                contentDescription =
-                                    "No saved resources",
-
-                                tint =
-                                    ZivaSecondary,
-
-                                modifier =
-                                    Modifier.size(48.dp)
+                                contentDescription = null,
+                                tint = ZivaSecondary,
+                                modifier = Modifier.size(50.dp)
                             )
 
                             Spacer(
                                 modifier =
-                                    Modifier.height(12.dp)
+                                    Modifier.height(10.dp)
                             )
 
                             Text(
                                 text =
                                     "No saved resources yet",
-
-                                color =
-                                    ZivaText,
-
-                                fontSize = 16.sp,
-
+                                color = ZivaText,
                                 fontWeight =
-                                    FontWeight.Bold
+                                    FontWeight.Bold,
+                                fontSize = 16.sp
                             )
 
                             Spacer(
@@ -888,10 +598,7 @@ fun ResourceListMapScreen(
                             Text(
                                 text =
                                     "Bookmark important relief records\nso you can find them quickly.",
-
-                                color =
-                                    ZivaSecondary,
-
+                                color = ZivaSecondary,
                                 fontSize = 12.sp
                             )
                         }
@@ -899,48 +606,34 @@ fun ResourceListMapScreen(
 
                 } else {
 
-                    // -------------------------------------------------
-                    // SAVED LIST
-                    // -------------------------------------------------
-
                     LazyColumn(
-                        modifier =
-                            Modifier.fillMaxSize(),
-
                         verticalArrangement =
                             Arrangement.spacedBy(10.dp)
                     ) {
 
                         items(
                             savedResources,
-                            key = {
-                                it.resourceId
-                            }
-                        ) { res ->
+                            key = { it.resourceId }
+                        ) { resource ->
 
                             ResourceCardItem(
-
-                                resource = res,
-
+                                resource = resource,
                                 isSaved = true,
-
                                 onToggleSaved = {
                                     onToggleSaved(
-                                        res.resourceId
+                                        resource.resourceId
                                     )
                                 },
-
                                 onClick = {
-                                    onSelectResource(res)
+                                    onSelectResource(resource)
                                 }
                             )
                         }
 
                         item {
-
                             Spacer(
                                 modifier =
-                                    Modifier.height(16.dp)
+                                    Modifier.height(20.dp)
                             )
                         }
                     }
@@ -948,20 +641,16 @@ fun ResourceListMapScreen(
             }
 
 
-            // =====================================================
-            // VOLUNTEERS
-            // =====================================================
+            // =========================================================
+            // VOLUNTEERS TAB
+            // =========================================================
 
         } else {
 
             LazyColumn(
-                modifier =
-                    Modifier
-                        .fillMaxSize()
-                        .padding(
-                            horizontal = 16.dp
-                        ),
-
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp),
                 verticalArrangement =
                     Arrangement.spacedBy(10.dp)
             ) {
@@ -971,43 +660,46 @@ fun ResourceListMapScreen(
                     Text(
                         text =
                             "Verified Nearby Volunteers & First Responders",
-
-                        color =
-                            ZivaSecondary,
-
-                        fontSize = 12.sp,
-
-                        fontWeight =
-                            FontWeight.SemiBold
+                        color = ZivaText,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
                     )
 
                     Spacer(
                         modifier =
                             Modifier.height(4.dp)
                     )
+
+                    Text(
+                        text =
+                            "People available to assist during emergencies",
+                        color = ZivaSecondary,
+                        fontSize = 11.sp
+                    )
+
+                    Spacer(
+                        modifier =
+                            Modifier.height(8.dp)
+                    )
                 }
 
                 items(
                     volunteers,
-                    key = {
-                        it.volunteerId
-                    }
-                ) { vol ->
+                    key = { it.volunteerId }
+                ) { volunteer ->
 
                     VolunteerCardItem(
-                        volunteer = vol,
-
+                        volunteer = volunteer,
                         onClick = {
-                            onSelectVolunteer(vol)
+                            onSelectVolunteer(volunteer)
                         }
                     )
                 }
 
                 item {
-
                     Spacer(
                         modifier =
-                            Modifier.height(16.dp)
+                            Modifier.height(20.dp)
                     )
                 }
             }
@@ -1016,29 +708,282 @@ fun ResourceListMapScreen(
 }
 
 
-// =====================================================================
-// RESOURCE CARD
-// =====================================================================
+// =================================================================
+// OFFLINE DISASTER MAP
+// =================================================================
 
 @Composable
-fun ResourceCardItem(
-    resource: ResourceEntity,
+private fun ZivaDisasterMap(
+    resources: List<ResourceEntity>,
+    onMarkerClick: () -> Unit
+) {
 
-    // SAVE FOR LATER
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(250.dp),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = Color(0xFFE8F0E8)
+        ),
+        border = androidx.compose.foundation.BorderStroke(
+            1.dp,
+            ZivaCardBorderSubtle
+        )
+    ) {
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clickable {
+
+                    if (resources.isNotEmpty()) {
+                        onMarkerClick()
+                    }
+                }
+        ) {
+
+            Canvas(
+                modifier = Modifier.fillMaxSize()
+            ) {
+
+                val gridColor =
+                    Color(0xFFD0DDD0)
+
+                val roadColor =
+                    Color.White
+
+                // =================================================
+                // MAP GRID
+                // =================================================
+
+                for (i in 1..9) {
+
+                    val x =
+                        size.width * i / 10f
+
+                    drawLine(
+                        color = gridColor,
+                        start = Offset(x, 0f),
+                        end = Offset(
+                            x,
+                            size.height
+                        ),
+                        strokeWidth = 2f
+                    )
+
+                    val y =
+                        size.height * i / 10f
+
+                    drawLine(
+                        color = gridColor,
+                        start = Offset(0f, y),
+                        end = Offset(
+                            size.width,
+                            y
+                        ),
+                        strokeWidth = 2f
+                    )
+                }
+
+
+                // =================================================
+                // ROADS
+                // =================================================
+
+                drawLine(
+                    color = roadColor,
+                    start = Offset(
+                        0f,
+                        size.height * 0.35f
+                    ),
+                    end = Offset(
+                        size.width,
+                        size.height * 0.55f
+                    ),
+                    strokeWidth = 22f
+                )
+
+                drawLine(
+                    color = roadColor,
+                    start = Offset(
+                        size.width * 0.25f,
+                        0f
+                    ),
+                    end = Offset(
+                        size.width * 0.65f,
+                        size.height
+                    ),
+                    strokeWidth = 18f
+                )
+
+                // =================================================
+                // SECONDARY ROADS
+                // =================================================
+
+                drawLine(
+                    color = roadColor,
+                    start = Offset(
+                        0f,
+                        size.height * 0.78f
+                    ),
+                    end = Offset(
+                        size.width * 0.85f,
+                        size.height * 0.15f
+                    ),
+                    strokeWidth = 10f
+                )
+
+                drawLine(
+                    color = roadColor,
+                    start = Offset(
+                        size.width * 0.72f,
+                        0f
+                    ),
+                    end = Offset(
+                        size.width * 0.45f,
+                        size.height
+                    ),
+                    strokeWidth = 9f
+                )
+
+
+                // =================================================
+                // RESOURCE MARKERS
+                // =================================================
+
+                resources.forEachIndexed { index, _ ->
+
+                    val x =
+                        size.width *
+                                (
+                                        0.12f +
+                                                (index % 4) * 0.25f
+                                        )
+
+                    val y =
+                        size.height *
+                                (
+                                        0.25f +
+                                                ((index / 4) % 3) * 0.25f
+                                        )
+
+                    // Outer marker
+                    drawCircle(
+                        color =
+                            Color(0xFFE85D75),
+                        radius = 17f,
+                        center =
+                            Offset(x, y)
+                    )
+
+                    // Inner marker
+                    drawCircle(
+                        color = Color.White,
+                        radius = 7f,
+                        center =
+                            Offset(x, y)
+                    )
+                }
+
+
+                // =================================================
+                // USER LOCATION
+                // =================================================
+
+                val userX =
+                    size.width * 0.5f
+
+                val userY =
+                    size.height * 0.65f
+
+                drawCircle(
+                    color =
+                        Color(0xFF2878D8),
+                    radius = 20f,
+                    center =
+                        Offset(
+                            userX,
+                            userY
+                        )
+                )
+
+                drawCircle(
+                    color = Color.White,
+                    radius = 8f,
+                    center =
+                        Offset(
+                            userX,
+                            userY
+                        )
+                )
+            }
+
+
+            // =====================================================
+            // MAP TITLE
+            // =====================================================
+
+            Text(
+                text = "LIVE DISASTER MAP",
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(12.dp),
+                color = Color(0xFF26352B),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+
+            // =====================================================
+            // USER LABEL
+            // =====================================================
+
+            Text(
+                text = "● YOU",
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(12.dp),
+                color = Color(0xFF2878D8),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+
+            // =====================================================
+            // RESOURCE COUNT
+            // =====================================================
+
+            Text(
+                text =
+                    "${resources.size} relief points",
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(12.dp),
+                color =
+                    Color(0xFFE85D75),
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+
+// =================================================================
+// RESOURCE CARD
+// =================================================================
+
+@Composable
+private fun ResourceCardItem(
+    resource: ResourceEntity,
     isSaved: Boolean,
     onToggleSaved: () -> Unit,
-
     onClick: () -> Unit
 ) {
 
-    val minutesAgo =
-        (
-                System.currentTimeMillis() -
-                        resource.lastUpdated
-                ) / (60 * 1000)
-
     val icon =
-        when (resource.type) {
+        when (resource.type.uppercase()) {
 
             "WATER" ->
                 Icons.Default.LocalDrink
@@ -1049,311 +994,150 @@ fun ResourceCardItem(
             "MEDICINE" ->
                 Icons.Default.LocalHospital
 
-            else ->
+            "SHELTER" ->
                 Icons.Default.NightShelter
-        }
-
-    val typeColor =
-        when (resource.type) {
-
-            "WATER" ->
-                Color(0xFF38BDF8)
-
-            "FOOD" ->
-                Color(0xFFFBBF24)
-
-            "MEDICINE" ->
-                Color(0xFFF43F5E)
 
             else ->
-                Color(0xFFA855F7)
+                Icons.Default.LocalDrink
         }
 
 
     Card(
-
-        colors =
-            CardDefaults.cardColors(
-                containerColor =
-                    ZivaSurface
-            ),
-
-        shape =
-            RoundedCornerShape(20.dp),
-
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                onClick()
+            },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = ZivaSurface
+        ),
         border =
-            BorderStroke(
+            androidx.compose.foundation.BorderStroke(
                 1.dp,
                 ZivaCardBorderSubtle
-            ),
-
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .clickable {
-                    onClick()
-                }
-                .testTag(
-                    "resource_item_${resource.resourceId}"
-                )
+            )
     ) {
 
-        Column(
-            modifier =
-                Modifier.padding(16.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment =
+                Alignment.CenterVertically
         ) {
 
-            // =================================================
-            // TOP ROW
-            // =================================================
-
-            Row(
-
-                modifier =
-                    Modifier.fillMaxWidth(),
-
-                horizontalArrangement =
-                    Arrangement.SpaceBetween,
-
-                verticalAlignment =
-                    Alignment.CenterVertically
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(
+                        RoundedCornerShape(12.dp)
+                    )
+                    .background(
+                        ZivaBlueTint
+                    ),
+                contentAlignment =
+                    Alignment.Center
             ) {
 
-                Row(
-
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = ZivaPrimary,
                     modifier =
-                        Modifier.weight(1f),
-
-                    verticalAlignment =
-                        Alignment.CenterVertically
-                ) {
-
-                    // -----------------------------------------
-                    // RESOURCE ICON
-                    // -----------------------------------------
-
-                    Box(
-
-                        modifier =
-                            Modifier
-                                .size(44.dp)
-                                .clip(
-                                    RoundedCornerShape(14.dp)
-                                )
-                                .background(
-                                    typeColor.copy(
-                                        alpha = 0.15f
-                                    )
-                                ),
-
-                        contentAlignment =
-                            Alignment.Center
-                    ) {
-
-                        Icon(
-
-                            imageVector =
-                                icon,
-
-                            contentDescription =
-                                resource.type,
-
-                            tint =
-                                typeColor,
-
-                            modifier =
-                                Modifier.size(22.dp)
-                        )
-                    }
-
-                    Spacer(
-                        modifier =
-                            Modifier.width(12.dp)
-                    )
-
-                    // -----------------------------------------
-                    // RESOURCE NAME
-                    // -----------------------------------------
-
-                    Column {
-
-                        Text(
-
-                            text =
-                                resource.type,
-
-                            color =
-                                typeColor,
-
-                            fontSize = 10.sp,
-
-                            fontWeight =
-                                FontWeight.Bold,
-
-                            letterSpacing =
-                                1.sp
-                        )
-
-                        Text(
-
-                            text =
-                                resource.name,
-
-                            color =
-                                ZivaText,
-
-                            fontSize = 15.sp,
-
-                            fontWeight =
-                                FontWeight.Bold,
-
-                            maxLines = 1
-                        )
-                    }
-                }
-
-
-                // =================================================
-                // BOOKMARK BUTTON
-                // =================================================
-
-                IconButton(
-
-                    onClick = {
-                        onToggleSaved()
-                    },
-
-                    modifier =
-                        Modifier
-                            .size(40.dp)
-                            .testTag(
-                                "save_resource_${resource.resourceId}"
-                            )
-                ) {
-
-                    Icon(
-
-                        imageVector =
-                            if (isSaved)
-                                Icons.Default.Bookmark
-                            else
-                                Icons.Default.BookmarkBorder,
-
-                        contentDescription =
-                            if (isSaved)
-                                "Remove from Saved"
-                            else
-                                "Save for later",
-
-                        tint =
-                            if (isSaved)
-                                ZivaPrimary
-                            else
-                                ZivaSecondary
-                    )
-                }
-
-
-                // =================================================
-                // AVAILABILITY
-                // =================================================
-
-                Box(
-
-                    modifier =
-                        Modifier
-                            .clip(
-                                RoundedCornerShape(10.dp)
-                            )
-                            .background(
-                                ZivaPrimary
-                            )
-                            .padding(
-                                horizontal = 10.dp,
-                                vertical = 5.dp
-                            )
-                ) {
-
-                    Text(
-
-                        text =
-                            "${resource.availability} ${resource.unit.take(5)}",
-
-                        color =
-                            Color.White,
-
-                        fontSize = 11.sp,
-
-                        fontWeight =
-                            FontWeight.Bold
-                    )
-                }
+                        Modifier.size(24.dp)
+                )
             }
 
 
             Spacer(
                 modifier =
-                    Modifier.height(12.dp)
+                    Modifier.width(12.dp)
             )
 
 
-            // =================================================
-            // ACCESSIBILITY + FRESHNESS
-            // =================================================
-
-            Row(
-
+            Column(
                 modifier =
-                    Modifier.fillMaxWidth(),
-
-                horizontalArrangement =
-                    Arrangement.SpaceBetween,
-
-                verticalAlignment =
-                    Alignment.CenterVertically
+                    Modifier.weight(1f)
             ) {
 
-                Row(
-                    verticalAlignment =
-                        Alignment.CenterVertically
+                Text(
+                    text = resource.name,
+                    color = ZivaText,
+                    fontSize = 14.sp,
+                    fontWeight =
+                        FontWeight.Bold
+                )
+
+                Spacer(
+                    modifier =
+                        Modifier.height(3.dp)
+                )
+
+                Text(
+                    text = resource.type,
+                    color = ZivaPrimary,
+                    fontSize = 10.sp,
+                    fontWeight =
+                        FontWeight.Bold
+                )
+
+                Spacer(
+                    modifier =
+                        Modifier.height(3.dp)
+                )
+
+                Text(
+                    text =
+                        "${resource.availability} • ${resource.unit}",
+                    color = ZivaSecondary,
+                    fontSize = 11.sp
+                )
+
+                if (
+                    resource.accessibility.isNotBlank()
                 ) {
-
-                    Icon(
-
-                        imageVector =
-                            Icons.Default.Accessible,
-
-                        contentDescription =
-                            "Accessibility",
-
-                        tint =
-                            ZivaAccent,
-
-                        modifier =
-                            Modifier.size(13.dp)
-                    )
 
                     Spacer(
                         modifier =
-                            Modifier.width(4.dp)
+                            Modifier.height(2.dp)
                     )
 
                     Text(
-
                         text =
                             resource.accessibility,
-
                         color =
-                            ZivaText,
-
-                        fontSize = 11.sp
+                            ZivaSecondary,
+                        fontSize = 10.sp
                     )
                 }
+            }
 
 
-                FreshnessBadge(
-                    minutesAgo =
-                        minutesAgo
+            // SAVE BUTTON
+
+            IconButton(
+                onClick = onToggleSaved
+            ) {
+
+                Icon(
+                    imageVector =
+                        if (isSaved)
+                            Icons.Default.Bookmark
+                        else
+                            Icons.Default.BookmarkBorder,
+
+                    contentDescription =
+                        if (isSaved)
+                            "Remove from saved"
+                        else
+                            "Save for later",
+
+                    tint =
+                        if (isSaved)
+                            ZivaPrimary
+                        else
+                            ZivaSecondary
                 )
             }
         }
@@ -1361,184 +1145,107 @@ fun ResourceCardItem(
 }
 
 
-// =====================================================================
+// =================================================================
 // VOLUNTEER CARD
-// =====================================================================
+// =================================================================
 
 @Composable
-fun VolunteerCardItem(
+private fun VolunteerCardItem(
     volunteer: VolunteerEntity,
     onClick: () -> Unit
 ) {
 
     Card(
-
-        colors =
-            CardDefaults.cardColors(
-                containerColor =
-                    ZivaSurface
-            ),
-
-        shape =
-            RoundedCornerShape(20.dp),
-
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable {
+                onClick()
+            },
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = ZivaSurface
+        ),
         border =
-            BorderStroke(
+            androidx.compose.foundation.BorderStroke(
                 1.dp,
                 ZivaCardBorderSubtle
-            ),
-
-        modifier =
-            Modifier
-                .fillMaxWidth()
-                .clickable {
-                    onClick()
-                }
-                .testTag(
-                    "volunteer_item_${volunteer.volunteerId}"
-                )
+            )
     ) {
 
         Column(
             modifier =
-                Modifier.padding(16.dp)
+                Modifier.padding(14.dp)
         ) {
 
             Row(
-
-                modifier =
-                    Modifier.fillMaxWidth(),
-
-                horizontalArrangement =
-                    Arrangement.SpaceBetween,
-
                 verticalAlignment =
                     Alignment.CenterVertically
             ) {
 
-                Row(
-                    verticalAlignment =
-                        Alignment.CenterVertically
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(
+                            RoundedCornerShape(12.dp)
+                        )
+                        .background(
+                            ZivaBlueTint
+                        ),
+                    contentAlignment =
+                        Alignment.Center
                 ) {
 
-                    Box(
-
+                    Icon(
+                        imageVector =
+                            Icons.Default.Person,
+                        contentDescription = null,
+                        tint = ZivaPrimary,
                         modifier =
-                            Modifier
-                                .size(44.dp)
-                                .clip(
-                                    RoundedCornerShape(14.dp)
-                                )
-                                .background(
-                                    ZivaAccent.copy(
-                                        alpha = 0.15f
-                                    )
-                                ),
-
-                        contentAlignment =
-                            Alignment.Center
-                    ) {
-
-                        Icon(
-
-                            imageVector =
-                                Icons.Default.Person,
-
-                            contentDescription =
-                                "Volunteer",
-
-                            tint =
-                                ZivaAccent,
-
-                            modifier =
-                                Modifier.size(22.dp)
-                        )
-                    }
-
-                    Spacer(
-                        modifier =
-                            Modifier.width(12.dp)
+                            Modifier.size(23.dp)
                     )
-
-                    Column {
-
-                        Text(
-
-                            text =
-                                volunteer.name,
-
-                            color =
-                                ZivaText,
-
-                            fontSize = 15.sp,
-
-                            fontWeight =
-                                FontWeight.Bold
-                        )
-
-                        Text(
-
-                            text =
-                                "${volunteer.distanceKm} km away • ${volunteer.badge}",
-
-                            color =
-                                ZivaSecondary,
-
-                            fontSize = 11.sp
-                        )
-                    }
                 }
 
 
-                // ---------------------------------------------
-                // AVAILABILITY
-                // ---------------------------------------------
-
-                val isAvail =
-                    volunteer.availability ==
-                            "AVAILABLE"
-
-                Box(
-
+                Spacer(
                     modifier =
-                        Modifier
-                            .clip(
-                                RoundedCornerShape(10.dp)
-                            )
-                            .background(
+                        Modifier.width(10.dp)
+                )
 
-                                if (isAvail)
-                                    ZivaPrimary.copy(
-                                        alpha = 0.2f
-                                    )
-                                else
-                                    ZivaWarning.copy(
-                                        alpha = 0.2f
-                                    )
-                            )
-                            .padding(
-                                horizontal = 9.dp,
-                                vertical = 5.dp
-                            )
+
+                Column(
+                    modifier =
+                        Modifier.weight(1f)
                 ) {
 
                     Text(
+                        text = volunteer.name,
+                        color = ZivaText,
+                        fontSize = 14.sp,
+                        fontWeight =
+                            FontWeight.Bold
+                    )
 
-                        text =
-                            volunteer.availability,
+                    Spacer(
+                        modifier =
+                            Modifier.height(2.dp)
+                    )
 
-                        color =
-                            if (isAvail)
-                                ZivaPrimary
-                            else
-                                ZivaWarning,
-
+                    Text(
+                        text = volunteer.badge,
+                        color = ZivaPrimary,
                         fontSize = 10.sp,
-
                         fontWeight =
                             FontWeight.Bold
                     )
                 }
+
+
+                Text(
+                    text =
+                        "${volunteer.distanceKm} km",
+                    color = ZivaSecondary,
+                    fontSize = 10.sp
+                )
             }
 
 
@@ -1549,14 +1256,24 @@ fun VolunteerCardItem(
 
 
             Text(
+                text =
+                    "Availability: ${volunteer.availability}",
+                color = ZivaText,
+                fontSize = 11.sp
+            )
 
+
+            Spacer(
+                modifier =
+                    Modifier.height(4.dp)
+            )
+
+
+            Text(
                 text =
                     "Skills: ${volunteer.skills}",
-
-                color =
-                    ZivaText,
-
-                fontSize = 12.sp
+                color = ZivaSecondary,
+                fontSize = 10.sp
             )
 
 
@@ -1566,67 +1283,35 @@ fun VolunteerCardItem(
             )
 
 
-            Row(
-
+            Button(
+                onClick = onClick,
                 modifier =
                     Modifier.fillMaxWidth(),
-
-                horizontalArrangement =
-                    Arrangement.End
+                colors =
+                    ButtonDefaults.buttonColors(
+                        containerColor =
+                            ZivaPrimary
+                    )
             ) {
 
-                Button(
-
-                    onClick =
-                        onClick,
-
-                    colors =
-                        ButtonDefaults.buttonColors(
-                            containerColor =
-                                ZivaPrimary
-                        ),
-
-                    shape =
-                        RoundedCornerShape(8.dp),
-
+                Icon(
+                    imageVector =
+                        Icons.Default.Phone,
+                    contentDescription = null,
                     modifier =
-                        Modifier.height(34.dp)
-                ) {
+                        Modifier.size(16.dp)
+                )
 
-                    Icon(
+                Spacer(
+                    modifier =
+                        Modifier.width(6.dp)
+                )
 
-                        imageVector =
-                            Icons.Default.Phone,
-
-                        contentDescription =
-                            "Call",
-
-                        tint =
-                            Color.White,
-
-                        modifier =
-                            Modifier.size(14.dp)
-                    )
-
-                    Spacer(
-                        modifier =
-                            Modifier.width(6.dp)
-                    )
-
-                    Text(
-
-                        text =
-                            "Contact Volunteer",
-
-                        color =
-                            Color.White,
-
-                        fontSize = 11.sp,
-
-                        fontWeight =
-                            FontWeight.SemiBold
-                    )
-                }
+                Text(
+                    text =
+                        "Contact Volunteer",
+                    fontSize = 12.sp
+                )
             }
         }
     }
