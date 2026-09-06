@@ -1,7 +1,5 @@
 package com.example.ziva.presentation.ui.roles
 
-import androidx.compose.ui.graphics.vector.ImageVector
-
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -26,6 +24,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.HealthAndSafety
@@ -150,7 +149,11 @@ private fun RoleSelectionScreen(
             fontSize = 13.sp
         )
 
-        Spacer(modifier = Modifier.height(28.dp))
+        Spacer(modifier = Modifier.height(20.dp))
+
+        ZivaBotCard()
+
+        Spacer(modifier = Modifier.height(20.dp))
 
         RoleCard(
             title = "VOLUNTEER",
@@ -169,10 +172,6 @@ private fun RoleSelectionScreen(
             buttonText = "ENTER RESPONSE MODE",
             onClick = onProvider
         )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        ZivaBotCard()
 
         Spacer(modifier = Modifier.weight(1f))
 
@@ -321,7 +320,7 @@ private fun openZivaBot(context: Context) {
 private fun RoleCard(
     title: String,
     description: String,
-    icon: ImageVector,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     buttonText: String,
     onClick: () -> Unit
 ) {
@@ -1096,7 +1095,7 @@ private fun ProviderIncidentCard(
 
 @Composable
 private fun ProviderRequirement(
-    icon: ImageVector,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
     title: String,
     value: String
 ) {
