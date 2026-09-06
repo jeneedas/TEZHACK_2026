@@ -1,0 +1,6 @@
+{
+  "name": "ZIVA",
+  "description": "Disaster assistance app with offline-first one-tap SOS, BLE multi-hop relay, verified resources, and live assistance tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
