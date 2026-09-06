@@ -1,7 +1,6 @@
 package com.example.ziva.presentation.ui.tracking
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,42 +12,30 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.Message
-import androidx.compose.material.icons.filled.NearMe
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Phone
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.ZivaAccent
 import com.example.ui.theme.ZivaBackground
-import com.example.ui.theme.ZivaBlueTint
-import com.example.ui.theme.ZivaCardBorder
-import com.example.ui.theme.ZivaCardBorderSubtle
 import com.example.ui.theme.ZivaCyanTint
 import com.example.ui.theme.ZivaPrimary
 import com.example.ui.theme.ZivaSecondary
@@ -57,8 +44,6 @@ import com.example.ui.theme.ZivaSurface
 import com.example.ui.theme.ZivaSurfaceVariant
 import com.example.ui.theme.ZivaText
 import com.example.ziva.data.local.TrackingSessionEntity
-import com.example.ziva.presentation.component.CustomMapCanvas
-import com.example.ziva.presentation.component.LiveStatusBadge
 
 @Composable
 fun AssistanceTrackingScreen(
@@ -68,17 +53,25 @@ fun AssistanceTrackingScreen(
     onCompleteRescue: (String) -> Unit,
     getString: (String) -> String
 ) {
-    val scrollState = rememberScrollState()
+
+    // ============================================================
+    // NO ACTIVE TRACKING
+    // ============================================================
 
     if (session == null) {
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(ZivaBackground)
-                .padding(24.dp),
+                .background(ZivaBackground),
             contentAlignment = Alignment.Center
         ) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(24.dp)
+            ) {
+
                 Box(
                     modifier = Modifier
                         .size(72.dp)
@@ -86,286 +79,409 @@ fun AssistanceTrackingScreen(
                         .background(ZivaSurface),
                     contentAlignment = Alignment.Center
                 ) {
+
                     Icon(
                         imageVector = Icons.Default.DirectionsCar,
-                        contentDescription = "No active rescue",
+                        contentDescription = null,
                         tint = ZivaSecondary,
                         modifier = Modifier.size(36.dp)
                     )
                 }
+
                 Spacer(modifier = Modifier.height(16.dp))
+
                 Text(
                     text = "No Active Assistance Tracking",
                     color = ZivaText,
                     fontSize = 18.sp,
                     fontWeight = FontWeight.Bold
                 )
-                Spacer(modifier = Modifier.height(6.dp))
+
+                Spacer(modifier = Modifier.height(8.dp))
+
                 Text(
-                    text = "Trigger an SOS alert or request a volunteer to start live ride-hailing style tracking.",
+                    text = "Trigger an SOS or request assistance to start live tracking.",
                     color = ZivaSecondary,
-                    fontSize = 13.sp,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    fontSize = 13.sp
                 )
             }
         }
+
         return
     }
 
-    val secondsAgo = ((System.currentTimeMillis() - session.lastUpdated) / 1000).coerceAtLeast(0)
+    // ============================================================
+    // ACTIVE TRACKING
+    // ============================================================
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(ZivaBackground)
-            .verticalScroll(scrollState)
             .padding(16.dp)
     ) {
-        // Top Status Header: ETA & Live Status
+
+        // --------------------------------------------------------
+        // HEADER
+        // --------------------------------------------------------
+
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+
             Column {
+
                 Text(
-                    text = getString("eta_label").uppercase(),
+                    text = "ASSISTANCE TRACKING",
                     color = ZivaSecondary,
                     fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 1.sp
+                    fontWeight = FontWeight.Bold
                 )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
                 Text(
                     text = "${session.etaMinutes} MIN AWAY",
                     color = ZivaPrimary,
-                    fontSize = 26.sp,
+                    fontSize = 27.sp,
                     fontWeight = FontWeight.Black
                 )
             }
 
-            // Stale vs Live indicator
-            LiveStatusBadge(
-                isLive = session.isLive,
-                lastSeenSecondsAgo = secondsAgo
-            )
-        }
+            // Simple LIVE indicator.
+            // No animation / graphicsLayer / custom component.
 
-        Spacer(modifier = Modifier.height(14.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
 
-        // Live Vector Map Canvas with Helper & User marker
-        CustomMapCanvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(260.dp)
-                .testTag("tracking_live_map"),
-            userPos = Pair(0.5f, 0.7f),
-            helperPos = Pair(0.72f, 0.32f)
-        )
+                Box(
+                    modifier = Modifier
+                        .size(9.dp)
+                        .clip(CircleShape)
+                        .background(ZivaAccent)
+                )
 
-        Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.width(6.dp))
 
-        // Assigned Helper Profile Card
-        Card(
-            colors = CardDefaults.cardColors(containerColor = ZivaSurface),
-            shape = RoundedCornerShape(20.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, ZivaCardBorderSubtle),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            modifier = Modifier
-                                .size(48.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(ZivaCyanTint),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Person,
-                                contentDescription = "Assigned Responder",
-                                tint = ZivaAccent,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = session.helperName,
-                                color = ZivaText,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "${session.helperRole} • Unit #402",
-                                color = ZivaAccent,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-
-                    // Contact Actions
-                    Row {
-                        IconButton(
-                            onClick = onSmsHelper,
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(ZivaSurfaceVariant)
-                                .testTag("sms_responder_button")
-                        ) {
-                            Icon(Icons.Default.Message, contentDescription = "SMS Responder", tint = ZivaPrimary, modifier = Modifier.size(18.dp))
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                        IconButton(
-                            onClick = onCallHelper,
-                            modifier = Modifier
-                                .size(38.dp)
-                                .clip(CircleShape)
-                                .background(ZivaPrimary)
-                                .testTag("call_responder_button")
-                        ) {
-                            Icon(Icons.Default.Phone, contentDescription = "Call Responder", tint = Color.White, modifier = Modifier.size(18.dp))
-                        }
-                    }
-                }
+                Text(
+                    text = if (session.isLive) "LIVE" else "OFFLINE",
+                    color = if (session.isLive) {
+                        ZivaAccent
+                    } else {
+                        ZivaSecondary
+                    },
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // STATUS TIMELINE: Requested -> Assigned -> En Route -> Arrived -> Completed
-        Card(
-            colors = CardDefaults.cardColors(containerColor = ZivaSurface),
-            shape = RoundedCornerShape(20.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, ZivaCardBorderSubtle),
-            modifier = Modifier.fillMaxWidth()
+        // --------------------------------------------------------
+        // MAP / LOCATION PANEL
+        // --------------------------------------------------------
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(235.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(ZivaSurface),
+            contentAlignment = Alignment.Center
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+
+                Box(
+                    modifier = Modifier
+                        .size(68.dp)
+                        .clip(CircleShape)
+                        .background(ZivaPrimary),
+                    contentAlignment = Alignment.Center
+                ) {
+
+                    Icon(
+                        imageVector = Icons.Default.DirectionsCar,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
                 Text(
-                    text = "Rescue Mission Timeline",
+                    text = "RESPONDER EN ROUTE",
                     color = ZivaText,
-                    fontSize = 15.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(5.dp))
 
-                val steps = listOf(
-                    Triple("REQUESTED", "Emergency SOS Logged", "Captured in local Room DB & BLE beacon"),
-                    Triple("ASSIGNED", "First Responder Dispatched", "Lt. Maya Lin accepted rescue task"),
-                    Triple("EN_ROUTE", "Rescuer En Route (ETA 3m)", "Equipped with swiftwater/first-aid gear"),
-                    Triple("ARRIVED", "Arrived at GPS Location", "Making direct visual contact"),
-                    Triple("COMPLETED", "Evacuated & Safe", "Rescue mission closed successfully")
+                Text(
+                    text = "Unit #402 • ${session.etaMinutes} minutes away",
+                    color = ZivaSecondary,
+                    fontSize = 12.sp
                 )
 
-                val currentStepIndex = when (session.status) {
-                    "REQUESTED" -> 0
-                    "ASSIGNED" -> 1
-                    "EN_ROUTE" -> 2
-                    "ARRIVED" -> 3
-                    "COMPLETED" -> 4
-                    else -> 2
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Text(
+                    text = "●  LIVE LOCATION",
+                    color = ZivaAccent,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // --------------------------------------------------------
+        // RESPONDER
+        // --------------------------------------------------------
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(18.dp))
+                .background(ZivaSurface)
+                .padding(15.dp)
+        ) {
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(ZivaCyanTint),
+                    contentAlignment = Alignment.Center
+                ) {
+
+                    Icon(
+                        imageVector = Icons.Default.Person,
+                        contentDescription = null,
+                        tint = ZivaAccent,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
 
-                steps.forEachIndexed { index, step ->
-                    val isDone = index <= currentStepIndex
-                    val isCurrent = index == currentStepIndex
+                Spacer(modifier = Modifier.width(12.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.Top
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.width(28.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(22.dp)
-                                    .clip(CircleShape)
-                                    .background(
-                                        when {
-                                            isDone -> ZivaPrimary
-                                            else -> ZivaSurfaceVariant
-                                        }
-                                    ),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                if (isDone) {
-                                    Icon(
-                                        imageVector = Icons.Default.Check,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(6.dp)
-                                            .clip(CircleShape)
-                                            .background(ZivaSecondary)
-                                    )
-                                }
-                            }
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
 
-                            if (index < steps.size - 1) {
-                                Box(
-                                    modifier = Modifier
-                                        .width(2.dp)
-                                        .height(34.dp)
-                                        .background(if (index < currentStepIndex) ZivaPrimary else ZivaSurfaceVariant)
-                                )
-                            }
-                        }
+                    Text(
+                        text = session.helperName,
+                        color = ZivaText,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
 
-                        Spacer(modifier = Modifier.width(12.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
 
-                        Column(modifier = Modifier.padding(bottom = 12.dp)) {
-                            Text(
-                                text = step.second,
-                                color = if (isDone) ZivaText else ZivaSecondary,
-                                fontSize = 13.sp,
-                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.SemiBold
-                            )
-                            Text(
-                                text = step.third,
-                                color = ZivaSecondary,
-                                fontSize = 11.sp
-                            )
-                        }
-                    }
+                    Text(
+                        text = "${session.helperRole} • Unit #402",
+                        color = ZivaAccent,
+                        fontSize = 12.sp
+                    )
+                }
+
+                IconButton(
+                    onClick = onSmsHelper,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(ZivaSurfaceVariant)
+                ) {
+
+                    Icon(
+                        imageVector = Icons.Default.Message,
+                        contentDescription = "Message responder",
+                        tint = ZivaPrimary
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(6.dp))
+
+                IconButton(
+                    onClick = onCallHelper,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(ZivaPrimary)
+                ) {
+
+                    Icon(
+                        imageVector = Icons.Default.Phone,
+                        contentDescription = "Call responder",
+                        tint = Color.White
+                    )
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // Complete Rescue Action
-        Button(
-            onClick = { onCompleteRescue(session.requestId) },
-            colors = ButtonDefaults.buttonColors(containerColor = ZivaSuccess),
-            shape = RoundedCornerShape(12.dp),
+        // --------------------------------------------------------
+        // STATUS
+        // --------------------------------------------------------
+
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp)
-                .testTag("mark_safe_button")
+                .clip(RoundedCornerShape(18.dp))
+                .background(ZivaSurface)
+                .padding(15.dp)
         ) {
-            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color.White)
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "Mark Myself Safe / Mission Completed",
-                color = Color.White,
-                fontWeight = FontWeight.Bold,
-                fontSize = 14.sp
-            )
+
+            Column {
+
+                Text(
+                    text = "RESCUE STATUS",
+                    color = ZivaSecondary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                TrackingStatusRow(
+                    title = "SOS REQUESTED",
+                    description = "Emergency alert received",
+                    active = true
+                )
+
+                TrackingStatusRow(
+                    title = "RESPONDER ASSIGNED",
+                    description = session.helperName,
+                    active = true
+                )
+
+                TrackingStatusRow(
+                    title = "EN ROUTE",
+                    description = "Responder is travelling to your location",
+                    active = session.status == "EN_ROUTE" ||
+                            session.status == "ARRIVED" ||
+                            session.status == "COMPLETED"
+                )
+
+                TrackingStatusRow(
+                    title = "ARRIVED",
+                    description = "Responder reached your location",
+                    active = session.status == "ARRIVED" ||
+                            session.status == "COMPLETED"
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // --------------------------------------------------------
+        // COMPLETE
+        // --------------------------------------------------------
+
+        Button(
+            onClick = {
+                onCompleteRescue(session.requestId)
+            },
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+            shape = RoundedCornerShape(12.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = ZivaSuccess
+            )
+        ) {
+
+            Icon(
+                imageVector = Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = Color.White
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Text(
+                text = "MARK MYSELF SAFE",
+                color = Color.White,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+// ================================================================
+// SIMPLE STATUS ROW
+// ================================================================
+
+@Composable
+private fun TrackingStatusRow(
+    title: String,
+    description: String,
+    active: Boolean
+) {
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+
+        Box(
+            modifier = Modifier
+                .size(25.dp)
+                .clip(CircleShape)
+                .background(
+                    if (active) {
+                        ZivaPrimary
+                    } else {
+                        ZivaSurfaceVariant
+                    }
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+
+            if (active) {
+
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.width(12.dp))
+
+        Column {
+
+            Text(
+                text = title,
+                color = if (active) ZivaText else ZivaSecondary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Text(
+                text = description,
+                color = ZivaSecondary,
+                fontSize = 10.sp
+            )
+        }
     }
 }

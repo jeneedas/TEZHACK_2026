@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface SosDao {
+
     @Query("SELECT * FROM sos_requests ORDER BY timestamp DESC")
     fun getAllSosRequests(): Flow<List<SosRequestEntity>>
 
@@ -27,18 +28,39 @@ interface SosDao {
     @Update
     suspend fun updateSos(sos: SosRequestEntity)
 
-    @Query("UPDATE sos_requests SET status = :status, syncState = :syncState, retryCount = retryCount + 1 WHERE requestId = :requestId")
-    suspend fun updateSyncStatus(requestId: String, status: String, syncState: String)
+    @Query("""
+        UPDATE sos_requests
+        SET status = :status,
+            syncState = :syncState,
+            retryCount = retryCount + 1
+        WHERE requestId = :requestId
+    """)
+    suspend fun updateSyncStatus(
+        requestId: String,
+        status: String,
+        syncState: String
+    )
 
-    @Query("UPDATE sos_requests SET bleHops = :hops, status = :status WHERE requestId = :requestId")
-    suspend fun updateBleHops(requestId: String, hops: Int, status: String)
+    @Query("""
+        UPDATE sos_requests
+        SET bleHops = :hops,
+            status = :status
+        WHERE requestId = :requestId
+    """)
+    suspend fun updateBleHops(
+        requestId: String,
+        hops: Int,
+        status: String
+    )
 
     @Query("DELETE FROM sos_requests WHERE requestId = :requestId")
     suspend fun deleteSos(requestId: String)
 }
 
+
 @Dao
 interface ResourceDao {
+
     @Query("SELECT * FROM resources ORDER BY availability DESC")
     fun getAllResources(): Flow<List<ResourceEntity>>
 
@@ -48,15 +70,26 @@ interface ResourceDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAll(resources: List<ResourceEntity>)
 
-    @Query("UPDATE resources SET availability = :newCount, lastUpdated = :timestamp WHERE resourceId = :resourceId")
-    suspend fun updateAvailability(resourceId: String, newCount: Int, timestamp: Long)
+    @Query("""
+        UPDATE resources
+        SET availability = :newCount,
+            lastUpdated = :timestamp
+        WHERE resourceId = :resourceId
+    """)
+    suspend fun updateAvailability(
+        resourceId: String,
+        newCount: Int,
+        timestamp: Long
+    )
 
     @Query("SELECT COUNT(*) FROM resources")
     suspend fun getCount(): Int
 }
 
+
 @Dao
 interface VolunteerDao {
+
     @Query("SELECT * FROM volunteers ORDER BY distanceKm ASC")
     fun getAllVolunteers(): Flow<List<VolunteerEntity>>
 
@@ -67,29 +100,119 @@ interface VolunteerDao {
     suspend fun getCount(): Int
 }
 
+
 @Dao
 interface TrackingDao {
-    @Query("SELECT * FROM tracking_sessions ORDER BY lastUpdated DESC LIMIT 1")
+
+    @Query("""
+        SELECT * FROM tracking_sessions
+        ORDER BY lastUpdated DESC
+        LIMIT 1
+    """)
     fun getActiveTrackingSession(): Flow<TrackingSessionEntity?>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertOrUpdate(session: TrackingSessionEntity)
+    suspend fun insertOrUpdate(
+        session: TrackingSessionEntity
+    )
 
-    @Query("UPDATE tracking_sessions SET status = :status, etaMinutes = :etaMinutes, helperLatitude = :lat, helperLongitude = :lng, lastUpdated = :lastUpdated WHERE sessionId = :sessionId")
-    suspend fun updateTrackingState(sessionId: String, status: String, etaMinutes: Int, lat: Double, lng: Double, lastUpdated: Long)
+    @Query("""
+        UPDATE tracking_sessions
+        SET status = :status,
+            etaMinutes = :etaMinutes,
+            helperLatitude = :lat,
+            helperLongitude = :lng,
+            lastUpdated = :lastUpdated
+        WHERE sessionId = :sessionId
+    """)
+    suspend fun updateTrackingState(
+        sessionId: String,
+        status: String,
+        etaMinutes: Int,
+        lat: Double,
+        lng: Double,
+        lastUpdated: Long
+    )
 }
+
 
 @Dao
 interface BleRelayDao {
-    @Query("SELECT * FROM ble_relay_hashes ORDER BY receivedAt DESC")
+
+    @Query("""
+        SELECT * FROM ble_relay_hashes
+        ORDER BY receivedAt DESC
+    """)
     fun getAllHashes(): Flow<List<BleRelayHashEntity>>
 
-    @Query("SELECT EXISTS(SELECT 1 FROM ble_relay_hashes WHERE hash = :hash)")
+    @Query("""
+        SELECT EXISTS(
+            SELECT 1
+            FROM ble_relay_hashes
+            WHERE hash = :hash
+        )
+    """)
     suspend fun hashExists(hash: String): Boolean
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
-    suspend fun insertHash(entry: BleRelayHashEntity): Long
+    suspend fun insertHash(
+        entry: BleRelayHashEntity
+    ): Long
 
     @Query("SELECT COUNT(*) FROM ble_relay_hashes")
     suspend fun getTotalPacketsRelayed(): Int
+}
+
+
+/*
+ * SAVE FOR LATER
+ *
+ * Stores only the resource ID and save time.
+ * The actual resource information continues
+ * to come from ResourceEntity.
+ */
+@Dao
+interface SavedResourceDao {
+
+    @Query("""
+        SELECT *
+        FROM saved_resources
+        ORDER BY savedAt DESC
+    """)
+    fun getAllSavedResources(): Flow<List<SavedResourceEntity>>
+
+    @Query("""
+        SELECT EXISTS(
+            SELECT 1
+            FROM saved_resources
+            WHERE resourceId = :resourceId
+        )
+    """)
+    fun isResourceSaved(
+        resourceId: String
+    ): Flow<Boolean>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun saveResource(
+        resource: SavedResourceEntity
+    )
+
+    @Query("""
+        DELETE FROM saved_resources
+        WHERE resourceId = :resourceId
+    """)
+    suspend fun removeSavedResource(
+        resourceId: String
+    )
+
+    @Query("""
+        SELECT EXISTS(
+            SELECT 1
+            FROM saved_resources
+            WHERE resourceId = :resourceId
+        )
+    """)
+    suspend fun isResourceSavedOnce(
+        resourceId: String
+    ): Boolean
 }

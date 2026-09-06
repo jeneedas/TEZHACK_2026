@@ -11,6 +11,7 @@ plugins {
 
 android {
   namespace = "com.example"
+
   compileSdk {
     version = release(36) {
       minorApiLevel = 1
@@ -125,7 +126,7 @@ dependencies {
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
 
-  // Networking / Serialization
+  // Networking
   implementation(libs.converter.moshi)
   implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
@@ -141,6 +142,8 @@ dependencies {
 
   // Location
   implementation(libs.play.services.location)
+  implementation(libs.play.services.maps)
+  implementation(libs.maps.compose)
 
   // Logging
   implementation(libs.logging.interceptor)

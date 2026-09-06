@@ -5,6 +5,7 @@ import com.example.ziva.data.local.ResourceEntity
 import com.example.ziva.data.local.SosRequestEntity
 import com.example.ziva.data.local.TrackingSessionEntity
 import com.example.ziva.data.local.VolunteerEntity
+import com.example.ziva.data.remote.FirebaseSosService
 import com.example.ziva.service.ble.BleMeshStats
 import com.example.ziva.service.ble.BleRelayEngine
 import com.example.ziva.util.TelemetryManager
@@ -29,7 +30,8 @@ data class SyncQueueStatus(
 class ZivaRepository(
     private val database: AppDatabase,
     private val bleEngine: BleRelayEngine,
-    private val telemetryManager: TelemetryManager
+    private val telemetryManager: TelemetryManager,
+    private val firebaseSosService: FirebaseSosService
 ) {
     private val scope = CoroutineScope(Dispatchers.IO)
 
@@ -111,8 +113,10 @@ class ZivaRepository(
 
             // If connected or mesh reaches an internet-connected node, auto-sync
             if (!_simulatedOffline.value && telemetry.connectivityState != "OFFLINE") {
-                delay(1200)
-                database.sosDao().updateSyncStatus(requestId, "SYNCED_TO_CLOUD", "SYNCED")
+                val success = firebaseSosService.uploadSos(entity)
+                if (success) {
+                    database.sosDao().updateSyncStatus(requestId, "SYNCED_TO_CLOUD", "SYNCED")
+                }
             }
         }
 
@@ -183,17 +187,23 @@ class ZivaRepository(
             return false
         }
 
-        delay(1200) // Simulating network upload with exponential backoff logic
+        var allSuccess = true
         for (item in unsynced) {
-            database.sosDao().updateSyncStatus(item.requestId, "SYNCED_TO_CLOUD", "SYNCED")
+            val success = firebaseSosService.uploadSos(item)
+            if (success) {
+                database.sosDao().updateSyncStatus(item.requestId, "SYNCED_TO_CLOUD", "SYNCED")
+            } else {
+                allSuccess = false
+            }
         }
 
         _syncStatus.value = _syncStatus.value.copy(
             isSyncing = false,
-            unsyncedCount = 0,
-            lastSyncTimestamp = System.currentTimeMillis()
+            unsyncedCount = if (allSuccess) 0 else database.sosDao().getUnsyncedSosRequests().size,
+            lastSyncTimestamp = System.currentTimeMillis(),
+            lastError = if (allSuccess) null else "Failed to sync some requests to cloud."
         )
-        return true
+        return allSuccess
     }
 
     private suspend fun updateSyncCount() {

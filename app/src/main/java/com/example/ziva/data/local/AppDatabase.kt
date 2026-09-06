@@ -15,46 +15,75 @@ import kotlinx.coroutines.launch
         ResourceEntity::class,
         VolunteerEntity::class,
         TrackingSessionEntity::class,
-        BleRelayHashEntity::class
+        BleRelayHashEntity::class,
+        SavedResourceEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
+
     abstract fun sosDao(): SosDao
+
     abstract fun resourceDao(): ResourceDao
+
     abstract fun volunteerDao(): VolunteerDao
+
     abstract fun trackingDao(): TrackingDao
+
     abstract fun bleRelayDao(): BleRelayDao
 
+    abstract fun savedResourceDao(): SavedResourceDao
+
     companion object {
+
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
         fun getInstance(context: Context): AppDatabase {
+
             return INSTANCE ?: synchronized(this) {
+
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "ziva_disaster_db"
-                ).addCallback(object : Callback() {
-                    override fun onCreate(db: SupportSQLiteDatabase) {
-                        super.onCreate(db)
-                        CoroutineScope(Dispatchers.IO).launch {
-                            seedInitialData(getInstance(context))
+                )
+                    .fallbackToDestructiveMigration()
+                    .addCallback(object : Callback() {
+
+                        override fun onCreate(
+                            db: SupportSQLiteDatabase
+                        ) {
+                            super.onCreate(db)
+
+                            CoroutineScope(Dispatchers.IO).launch {
+                                seedInitialData(
+                                    getInstance(context)
+                                )
+                            }
                         }
-                    }
-                }).build()
+                    })
+                    .build()
+
                 INSTANCE = instance
+
                 instance
             }
         }
 
-        suspend fun seedInitialData(database: AppDatabase) {
+        suspend fun seedInitialData(
+            database: AppDatabase
+        ) {
+
             val now = System.currentTimeMillis()
 
-            // Seed initial disaster verified resources
+            // ============================================
+            // SEED INITIAL DISASTER VERIFIED RESOURCES
+            // ============================================
+
             val initialResources = listOf(
+
                 ResourceEntity(
                     resourceId = "res_water_01",
                     type = "WATER",
@@ -70,6 +99,7 @@ abstract class AppDatabase : RoomDatabase() {
                     contactPhone = "+1 (800) 555-0199",
                     notes = "Clean drinking water distribution with clean container distribution available."
                 ),
+
                 ResourceEntity(
                     resourceId = "res_food_02",
                     type = "FOOD",
@@ -85,6 +115,7 @@ abstract class AppDatabase : RoomDatabase() {
                     contactPhone = "+1 (800) 555-0142",
                     notes = "MREs, baby formula, high-calorie biscuit packs available."
                 ),
+
                 ResourceEntity(
                     resourceId = "res_med_03",
                     type = "MEDICINE",
@@ -100,6 +131,7 @@ abstract class AppDatabase : RoomDatabase() {
                     contactPhone = "+1 (800) 555-0112",
                     notes = "Insulin storage (generator backup), burn dressings, saline & antibiotics."
                 ),
+
                 ResourceEntity(
                     resourceId = "res_shelter_04",
                     type = "SHELTER",
@@ -115,6 +147,7 @@ abstract class AppDatabase : RoomDatabase() {
                     contactPhone = "+1 (800) 555-0188",
                     notes = "Pet-friendly annex, solar charging stations, secure emergency sleep quarters."
                 ),
+
                 ResourceEntity(
                     resourceId = "res_water_05",
                     type = "WATER",
@@ -124,17 +157,25 @@ abstract class AppDatabase : RoomDatabase() {
                     availability = 320,
                     unit = "liters potable water",
                     accessibility = "Stairs only (assistance available)",
-                    freshnessMinutesAgo = 45, // Stale! > 30 minutes threshold
+                    freshnessMinutesAgo = 45,
                     lastUpdated = now - (45 * 60 * 1000),
                     verifiedBy = "Local Relief Volunteer",
                     contactPhone = "+1 (800) 555-0176",
                     notes = "Water tanker supply was being replenished. Needs fresh status verification."
                 )
             )
-            database.resourceDao().insertAll(initialResources)
 
-            // Seed verified volunteers
+            database
+                .resourceDao()
+                .insertAll(initialResources)
+
+
+            // ============================================
+            // SEED VERIFIED VOLUNTEERS
+            // ============================================
+
             val initialVolunteers = listOf(
+
                 VolunteerEntity(
                     volunteerId = "vol_01",
                     name = "Lt. Maya Lin",
@@ -148,6 +189,7 @@ abstract class AppDatabase : RoomDatabase() {
                     badge = "Certified First Responder",
                     rating = 4.95f
                 ),
+
                 VolunteerEntity(
                     volunteerId = "vol_02",
                     name = "Dr. Rohan Patel",
@@ -161,6 +203,7 @@ abstract class AppDatabase : RoomDatabase() {
                     badge = "Medical Officer",
                     rating = 5.0f
                 ),
+
                 VolunteerEntity(
                     volunteerId = "vol_03",
                     name = "Elena Rostova",
@@ -174,6 +217,7 @@ abstract class AppDatabase : RoomDatabase() {
                     badge = "Field Evac Specialist",
                     rating = 4.88f
                 ),
+
                 VolunteerEntity(
                     volunteerId = "vol_04",
                     name = "Kofi Mensah",
@@ -188,9 +232,16 @@ abstract class AppDatabase : RoomDatabase() {
                     rating = 4.92f
                 )
             )
-            database.volunteerDao().insertAll(initialVolunteers)
 
-            // Seed active tracking session demo (ride-hailing style rescue flow)
+            database
+                .volunteerDao()
+                .insertAll(initialVolunteers)
+
+
+            // ============================================
+            // SEED ACTIVE TRACKING SESSION
+            // ============================================
+
             val demoTracking = TrackingSessionEntity(
                 sessionId = "track_active_01",
                 requestId = "REQ-DEMO-9912",
@@ -204,10 +255,13 @@ abstract class AppDatabase : RoomDatabase() {
                 userLongitude = -122.4194,
                 etaMinutes = 3,
                 status = "EN_ROUTE",
-                lastUpdated = now - (45 * 1000), // 45 seconds ago (Live)
+                lastUpdated = now - (45 * 1000),
                 isLive = true
             )
-            database.trackingDao().insertOrUpdate(demoTracking)
+
+            database
+                .trackingDao()
+                .insertOrUpdate(demoTracking)
         }
     }
 }
