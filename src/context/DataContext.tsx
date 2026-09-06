@@ -2,9 +2,17 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
-  useState,
+  useState
 } from 'react'
+
+import {
+  collection,
+  onSnapshot
+} from 'firebase/firestore'
+
+import { db } from '../firebase'
 
 import type {
   Incident,
@@ -15,6 +23,8 @@ import type {
   FieldUpdate,
   Verification,
   AlertItem,
+  IncidentType,
+  Severity
 } from '../types'
 
 import { initialIncidents } from '../data/kamrupIncidents'
@@ -24,60 +34,338 @@ import { initialRoutes } from '../data/kamrupRoutes'
 import { initialFieldUpdates } from '../data/kamrupFieldUpdates'
 
 import { deriveAllIncidents } from '../services/incidentService'
+
 import {
   recommendResource,
   recommendRoute,
-  explainResourceRecommendation,
+  explainResourceRecommendation
 } from '../services/intelligenceService'
 
+
 /* =========================================================
-   ZIVA OPERATIONAL TYPES
+   FIREBASE → ZIVA INCIDENT HELPERS
    ========================================================= */
 
-export type PriorityBreakdown = {
-  score: number
-  severity: number
-  affectedPeople: number
-  trapped: number
-  medical: number
-  waiting: number
-  confidencePenalty: number
-  band: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW'
+function timestampToIso(value: unknown): string {
+  if (!value) {
+    return new Date().toISOString()
+  }
+
+  if (
+    typeof value === 'object' &&
+    value !== null &&
+    'toDate' in value &&
+    typeof (value as { toDate?: unknown }).toDate === 'function'
+  ) {
+    return (
+      (value as { toDate: () => Date })
+        .toDate()
+        .toISOString()
+    )
+  }
+
+  if (typeof value === 'number') {
+    return new Date(value).toISOString()
+  }
+
+  if (typeof value === 'string') {
+    const parsed = new Date(value)
+
+    if (!Number.isNaN(parsed.getTime())) {
+      return parsed.toISOString()
+    }
+  }
+
+  return new Date().toISOString()
 }
 
-export type ResourceOperationalState = {
-  resource: Resource
-  distanceKm: number
-  freshnessScore: number
-  freshnessLabel: string
-  trustScore: number
-  accessibility: 'ACCESSIBLE' | 'RESTRICTED' | 'BLOCKED' | 'UNKNOWN'
-  suitabilityScore: number
-  recommended: boolean
-  reasons: string[]
+
+function normalizeText(value: unknown): string {
+  return String(value ?? '')
+    .trim()
+    .toUpperCase()
 }
 
-export type ReliefGap = {
-  type: string
-  demand: number
-  supply: number
-  gap: number
-  gapRate: number
+
+function getEmergencyLabel(emergencyType: unknown): string {
+  const value = normalizeText(emergencyType)
+
+  if (value.includes('MEDICAL')) return 'Medical Emergency'
+  if (value.includes('FLOOD')) return 'Flood Emergency'
+  if (value.includes('FIRE')) return 'Fire Emergency'
+  if (value.includes('LANDSLIDE')) return 'Landslide'
+  if (value.includes('COLLAPSE')) return 'Building Collapse'
+  if (value.includes('TRAPPED')) return 'Person Trapped'
+  if (value.includes('RESCUE')) return 'Rescue Request'
+  if (value.includes('EVAC')) return 'Evacuation Request'
+  if (value.includes('WATER')) return 'Water Emergency'
+  if (value.includes('FOOD')) return 'Food Emergency'
+
+  return 'Emergency SOS'
 }
 
-export type ConflictRecord = {
-  id: string
-  incidentId: string
-  title: string
-  reports: Report[]
-  status: 'OPEN' | 'RESOLVED'
+
+function getIncidentType(
+  emergencyType: unknown
+): IncidentType {
+  const value = normalizeText(emergencyType)
+
+  if (value.includes('MEDICAL')) {
+    return 'MEDICAL_EMERGENCY'
+  }
+
+  if (value.includes('FIRE')) {
+    return 'FIRE'
+  }
+
+  if (value.includes('LANDSLIDE')) {
+    return 'LANDSLIDE'
+  }
+
+  if (value.includes('COLLAPSE')) {
+    return 'BUILDING_COLLAPSE'
+  }
+
+  if (value.includes('TRAPPED')) {
+    return 'FLOOD_TRAPPED'
+  }
+
+  if (value.includes('ROAD')) {
+    return 'ROAD_BLOCKAGE'
+  }
+
+  if (value.includes('WATERLOG')) {
+    return 'WATERLOGGING'
+  }
+
+  if (value.includes('FLOOD')) {
+    return 'FLOOD'
+  }
+
+  return 'FLOOD'
 }
 
-export type DataContextValue = {
-  /* -------------------------
-     Core operational state
-     ------------------------- */
 
+function getSeverity(
+  emergencyType: unknown,
+  status: unknown
+): Severity {
+  const emergency = normalizeText(emergencyType)
+  const currentStatus = normalizeText(status)
+
+  if (
+    currentStatus === 'RESOLVED' ||
+    currentStatus === 'CLOSED'
+  ) {
+    return 'LOW'
+  }
+
+  if (
+    emergency.includes('TRAPPED') ||
+    emergency.includes('MEDICAL') ||
+    emergency.includes('COLLAPSE') ||
+    emergency.includes('RESCUE')
+  ) {
+    return 'CRITICAL'
+  }
+
+  if (
+    emergency.includes('FLOOD') ||
+    emergency.includes('FIRE') ||
+    emergency.includes('LANDSLIDE')
+  ) {
+    return 'HIGH'
+  }
+
+  return 'MEDIUM'
+}
+
+
+function getIncidentStatus(
+  status: unknown
+): Incident['status'] {
+  const value = normalizeText(status)
+
+  switch (value) {
+    case 'EN_ROUTE':
+      return 'EN_ROUTE'
+
+    case 'IN_PROGRESS':
+      return 'IN_PROGRESS'
+
+    case 'RESOLVED':
+    case 'FULFILLED':
+    case 'CLOSED':
+      return 'RESOLVED'
+
+    case 'ASSIGNED':
+      return 'TEAM_ASSIGNED'
+
+    case 'TRIAGED':
+    case 'PRIORITIZED':
+    case 'MATCHED':
+      return 'AWAITING_DISPATCH'
+
+    default:
+      return 'ACTIVE'
+  }
+}
+
+
+/* =========================================================
+   FIREBASE SOS → COORDINATOR INCIDENT
+   ========================================================= */
+
+function firebaseSosToIncident(
+  requestId: string,
+  data: Record<string, unknown>
+): Incident {
+  const latitude = Number(data.latitude ?? 0)
+  const longitude = Number(data.longitude ?? 0)
+
+  const emergencyType = data.emergencyType
+
+  const emergencyLabel =
+    getEmergencyLabel(emergencyType)
+
+  const incidentType =
+    getIncidentType(emergencyType)
+
+  const severity =
+    getSeverity(
+      emergencyType,
+      data.status
+    )
+
+  const status =
+    getIncidentStatus(data.status)
+
+  const timestamp =
+    timestampToIso(
+      data.serverReceivedAt ??
+        data.timestamp
+    )
+
+  const notes =
+    String(data.notes ?? '').trim()
+
+  const connectivity =
+    String(
+      data.connectivityState ?? 'ONLINE'
+    )
+
+  const battery =
+    data.batteryLevel !== undefined
+      ? ` Battery ${Number(data.batteryLevel)}%.`
+      : ''
+
+  const bleHops =
+    Number(data.bleHops ?? 0)
+
+  const description =
+    notes ||
+    `${emergencyLabel} received from ZIVA citizen app.${battery} Connectivity: ${connectivity}. BLE hops: ${bleHops}.`
+
+  const trappedPeople =
+    normalizeText(emergencyType).includes('TRAPPED')
+      ? 1
+      : 0
+
+  const medicalRequests =
+    normalizeText(emergencyType).includes('MEDICAL')
+      ? 1
+      : 0
+
+  const priorityScore =
+    severity === 'CRITICAL'
+      ? 95
+      : severity === 'HIGH'
+        ? 80
+        : severity === 'MEDIUM'
+          ? 60
+          : 30
+
+  const confidenceScore =
+    connectivity.includes('OFFLINE')
+      ? 70
+      : 90
+
+  const informationFog =
+    100 - confidenceScore
+
+  const codeSuffix =
+    requestId.length > 6
+      ? requestId.slice(-6).toUpperCase()
+      : requestId.toUpperCase()
+
+  return {
+    id: `SOS-${requestId}`,
+
+    code: `ZV-${codeSuffix}`,
+
+    name: `ZIVA SOS • ${emergencyLabel}`,
+
+    type: incidentType,
+
+    typeLabel: emergencyLabel,
+
+    severity,
+
+    position: {
+      lat: latitude,
+      lng: longitude
+    },
+
+    priorityScore,
+
+    confidenceScore,
+
+    informationFog,
+
+    affectedPeople: 1,
+
+    trappedPeople,
+
+    medicalRequests,
+
+    roadAccess: 'OPEN',
+
+    status,
+
+    description,
+
+    reportIds: [],
+
+    assignedResourceIds: [],
+
+    lastVerified: 'Not verified',
+
+    createdAt: timestamp,
+
+    updatedAt: timestamp,
+
+    requestId,
+
+    verificationStatus: 'UNVERIFIED',
+
+    vulnerabilityScore:
+      severity === 'CRITICAL'
+        ? 90
+        : severity === 'HIGH'
+          ? 75
+          : 50,
+
+    locationLabel:
+      `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
+  }
+}
+
+
+/* =========================================================
+   CONTEXT
+   ========================================================= */
+
+interface DataContextValue {
   incidents: Incident[]
   reports: Report[]
   resources: Resource[]
@@ -87,1634 +375,974 @@ export type DataContextValue = {
   verifications: Verification[]
   alerts: AlertItem[]
 
-  /* -------------------------
-     Basic lookups
-     ------------------------- */
-
   getIncident: (id: string) => Incident | undefined
   getReportsForIncident: (id: string) => Report[]
   getRoutesForIncident: (id: string) => RouteOption[]
   getResource: (id: string) => Resource | undefined
 
-  /* -------------------------
-     Decision engine
-     ------------------------- */
+  getRecommendedResource:
+    (incidentId: string) => Resource | undefined
 
-  getPriorityBreakdown: (
-    incidentId: string,
-  ) => PriorityBreakdown | undefined
+  getRecommendedRoute:
+    (incidentId: string) => RouteOption | undefined
 
-  getRecommendedResource: (
-    incidentId: string,
-  ) => Resource | undefined
+  getResourceExplanation:
+    (incidentId: string) => string
 
-  getRecommendedRoute: (
-    incidentId: string,
-  ) => RouteOption | undefined
+  dispatchResource:
+    (
+      incidentId: string,
+      resourceId: string,
+      routeId?: string
+    ) => Assignment
 
-  getResourceExplanation: (
-    incidentId: string,
-  ) => string
+  addFieldUpdate:
+    (update: Omit<FieldUpdate, 'id'>) => void
 
-  getResourceOperationalState: (
-    resourceId: string,
-    incidentId?: string,
-  ) => ResourceOperationalState | undefined
+  assignVerificationTeam:
+    (
+      incidentId: string,
+      teamResourceId: string
+    ) => void
 
-  getMatchingResources: (
-    incidentId: string,
-  ) => ResourceOperationalState[]
-
-  /* -------------------------
-     Trust / freshness
-     ------------------------- */
-
-  getResourceFreshness: (
-    resourceId: string,
-  ) => {
-    score: number
-    label: string
-    state: 'CURRENT' | 'AGING' | 'STALE' | 'OUTDATED'
-  } | undefined
-
-  getIncidentTrust: (
-    incidentId: string,
-  ) => {
-    confidence: number
-    reportCount: number
-    corroborated: number
-    conflicting: number
-    state:
-      | 'HIGH_CONFIDENCE'
-      | 'MODERATE_CONFIDENCE'
-      | 'LOW_CONFIDENCE'
-      | 'CONFLICTING'
-  } | undefined
-
-  getConflicts: () => ConflictRecord[]
-
-  /* -------------------------
-     Supply / demand
-     ------------------------- */
-
-  getReliefGaps: () => ReliefGap[]
-
-  /* -------------------------
-     Actions
-     ------------------------- */
-
-  dispatchResource: (
-    incidentId: string,
-    resourceId: string,
-    routeId?: string,
-  ) => Assignment
-
-  addFieldUpdate: (
-    update: Omit<FieldUpdate, 'id'>,
-  ) => void
-
-  assignVerificationTeam: (
-    incidentId: string,
-    teamResourceId: string,
-  ) => void
-
-  submitVerification: (
-    incidentId: string,
-    data: {
-      affectedPeople: number
-      trappedPeople: number
-      medicalRequests: number
-      roadAccess: 'OPEN' | 'PARTIAL' | 'BLOCKED'
-    },
-  ) => void
+  submitVerification:
+    (
+      incidentId: string,
+      data: {
+        affectedPeople: number
+        trappedPeople: number
+        medicalRequests: number
+        roadAccess:
+          | 'OPEN'
+          | 'PARTIAL'
+          | 'BLOCKED'
+      }
+    ) => void
 }
 
-/* =========================================================
-   CONSTANTS
-   ========================================================= */
 
-const DataContext = createContext<DataContextValue | undefined>(
-  undefined,
-)
+const DataContext =
+  createContext<DataContextValue | undefined>(
+    undefined
+  )
+
 
 let idCounter = 2000
 
-const EARTH_RADIUS_KM = 6371
 
 /* =========================================================
-   UTILITY FUNCTIONS
+   DATA PROVIDER
    ========================================================= */
 
-const clamp = (
-  value: number,
-  min = 0,
-  max = 100,
-) => Math.max(min, Math.min(max, value))
+export const DataProvider:
+  React.FC<{ children: React.ReactNode }> =
+  ({ children }) => {
 
-const getPriorityBand = (
-  score: number,
-): PriorityBreakdown['band'] => {
-  if (score >= 80) return 'CRITICAL'
-  if (score >= 60) return 'HIGH'
-  if (score >= 35) return 'MEDIUM'
-  return 'LOW'
-}
+    const [incidentsRaw, setIncidentsRaw] =
+      useState<Incident[]>(
+        initialIncidents
+      )
 
-/*
- * Haversine distance.
- *
- * ZIVA should eventually use the backend/geospatial layer
- * for authoritative spatial queries. This is the local
- * operational implementation for the coordinator prototype.
- */
-const haversineKm = (
-  lat1: number,
-  lng1: number,
-  lat2: number,
-  lng2: number,
-) => {
-  const toRad = (value: number) =>
-    (value * Math.PI) / 180
+    const [reports, setReports] =
+      useState<Report[]>(
+        initialReports
+      )
 
-  const dLat = toRad(lat2 - lat1)
-  const dLng = toRad(lng2 - lng1)
+    const [resources, setResources] =
+      useState<Resource[]>(
+        initialResources
+      )
 
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) *
-      Math.cos(toRad(lat2)) *
-      Math.sin(dLng / 2) ** 2
+    const [routes] =
+      useState<RouteOption[]>(
+        initialRoutes
+      )
 
-  const c =
-    2 *
-    Math.atan2(
-      Math.sqrt(a),
-      Math.sqrt(1 - a),
-    )
+    const [assignments, setAssignments] =
+      useState<Assignment[]>([])
 
-  return EARTH_RADIUS_KM * c
-}
+    const [fieldUpdates, setFieldUpdates] =
+      useState<FieldUpdate[]>(
+        initialFieldUpdates
+      )
 
-/* =========================================================
-   RESOURCE FRESHNESS
-   ========================================================= */
+    const [verifications, setVerifications] =
+      useState<Verification[]>([])
 
-const calculateFreshness = (
-  lastUpdate?: string,
-) => {
-  if (!lastUpdate) {
-    return {
-      score: 0,
-      label: 'Unknown',
-      state: 'OUTDATED' as const,
-    }
-  }
 
-  /*
-   * The existing DRISHTI dataset sometimes stores a
-   * human-readable time such as "09:30".
-   *
-   * In that case we cannot safely calculate absolute age,
-   * so we treat it as current for the demo.
-   *
-   * Firebase data will eventually store ISO timestamps.
-   */
+    /* =======================================================
+       FIREBASE REALTIME SOS LISTENER
+       ======================================================= */
 
-  const parsed = new Date(lastUpdate)
+    useEffect(() => {
 
-  if (Number.isNaN(parsed.getTime())) {
-    return {
-      score: 85,
-      label: 'Current',
-      state: 'CURRENT' as const,
-    }
-  }
-
-  const ageMinutes = Math.max(
-    0,
-    (Date.now() - parsed.getTime()) / 60000,
-  )
-
-  /*
-   * Exponential-style decay approximation.
-   *
-   * Faster decay is appropriate for emergency resources.
-   */
-  const score = clamp(
-    100 * Math.exp(-ageMinutes / 240),
-  )
-
-  if (score >= 75) {
-    return {
-      score,
-      label: 'Current',
-      state: 'CURRENT' as const,
-    }
-  }
-
-  if (score >= 45) {
-    return {
-      score,
-      label: 'Aging',
-      state: 'AGING' as const,
-    }
-  }
-
-  if (score >= 20) {
-    return {
-      score,
-      label: 'Stale',
-      state: 'STALE' as const,
-    }
-  }
-
-  return {
-    score,
-    label: 'Outdated',
-    state: 'OUTDATED' as const,
-  }
-}
-
-/* =========================================================
-   PROVIDER
-   ========================================================= */
-
-export const DataProvider: React.FC<{
-  children: React.ReactNode
-}> = ({ children }) => {
-  /* -------------------------------------------------------
-     STATE
-     ------------------------------------------------------- */
-
-  const [incidentsRaw, setIncidentsRaw] =
-    useState<Incident[]>(initialIncidents)
-
-  const [reports, setReports] =
-    useState<Report[]>(initialReports)
-
-  const [resources, setResources] =
-    useState<Resource[]>(initialResources)
-
-  const [routes] =
-    useState<RouteOption[]>(initialRoutes)
-
-  const [assignments, setAssignments] =
-    useState<Assignment[]>([])
-
-  const [fieldUpdates, setFieldUpdates] =
-    useState<FieldUpdate[]>(initialFieldUpdates)
-
-  const [verifications, setVerifications] =
-    useState<Verification[]>([])
-
-  /* -------------------------------------------------------
-     DERIVED INCIDENT STATE
-     ------------------------------------------------------- */
-
-  /*
-   * incidentService remains responsible for deriving the
-   * current confidence / information fog / priority from
-   * the report stream.
-   *
-   * This means pages never directly manipulate derived
-   * operational values.
-   */
-  const incidents = useMemo(
-    () =>
-      deriveAllIncidents(
-        incidentsRaw,
-        reports,
-      ),
-    [incidentsRaw, reports],
-  )
-
-  /* -------------------------------------------------------
-     LOOKUPS
-     ------------------------------------------------------- */
-
-  const getIncident = useCallback(
-    (id: string) =>
-      incidents.find(
-        (incident) => incident.id === id,
-      ),
-    [incidents],
-  )
-
-  const getReportsForIncident =
-    useCallback(
-      (id: string) =>
-        reports.filter(
-          (report) =>
-            report.incidentId === id,
-        ),
-      [reports],
-    )
-
-  const getRoutesForIncident =
-    useCallback(
-      (id: string) =>
-        routes.filter(
-          (route) =>
-            route.incidentId === id,
-        ),
-      [routes],
-    )
-
-  const getResource = useCallback(
-    (id: string) =>
-      resources.find(
-        (resource) =>
-          resource.id === id,
-      ),
-    [resources],
-  )
-
-  /* =======================================================
-     PRIORITY ENGINE
-     ======================================================= */
-
-  const getPriorityBreakdown =
-    useCallback(
-      (
-        incidentId: string,
-      ): PriorityBreakdown | undefined => {
-        const incident =
-          incidents.find(
-            (item) =>
-              item.id === incidentId,
-          )
-
-        if (!incident) return undefined
-
-        /*
-         * Normalised factors.
-         *
-         * These are intentionally bounded so that waiting
-         * time or population count cannot accidentally
-         * overwhelm a genuinely critical emergency.
-         */
-
-        const severityMap: Record<
-          string,
-          number
-        > = {
-          CRITICAL: 100,
-          HIGH: 75,
-          MEDIUM: 50,
-          LOW: 25,
-        }
-
-        const severity =
-          severityMap[
-            incident.severity
-          ] ?? 25
-
-        const affectedPeople = clamp(
-          incident.affectedPeople / 2,
+      const sosCollection =
+        collection(
+          db,
+          'sos_requests'
         )
 
-        const trapped = clamp(
-          incident.trappedPeople * 8,
+      const unsubscribe =
+        onSnapshot(
+          sosCollection,
+          (snapshot) => {
+
+            const firebaseIncidents =
+              snapshot.docs.map(
+                (document) => {
+
+                  const data =
+                    document.data() as Record<
+                      string,
+                      unknown
+                    >
+
+                  return firebaseSosToIncident(
+                    document.id,
+                    data
+                  )
+                }
+              )
+
+            setIncidentsRaw(
+              (previous) => {
+
+                const next = [
+                  ...previous
+                ]
+
+                firebaseIncidents.forEach(
+                  (firebaseIncident) => {
+
+                    const existingIndex =
+                      next.findIndex(
+                        (incident) =>
+                          incident.id ===
+                          firebaseIncident.id
+                      )
+
+                    if (
+                      existingIndex >= 0
+                    ) {
+                      /*
+                       * Firebase is the source of truth
+                       * for ZIVA SOS records.
+                       *
+                       * Preserve coordinator-side
+                       * assignments if they already exist.
+                       */
+
+                      const existing =
+                        next[
+                          existingIndex
+                        ]
+
+                      next[
+                        existingIndex
+                      ] = {
+                        ...firebaseIncident,
+
+                        assignedResourceIds:
+                          existing.assignedResourceIds,
+
+                        recommendedResourceId:
+                          existing.recommendedResourceId,
+
+                        recommendedRouteId:
+                          existing.recommendedRouteId,
+
+                        reportIds:
+                          existing.reportIds
+                      }
+
+                    } else {
+
+                      /*
+                       * New SOS received.
+                       * Add it without removing
+                       * existing demo incidents.
+                       */
+
+                      next.unshift(
+                        firebaseIncident
+                      )
+                    }
+                  }
+                )
+
+                return next
+              }
+            )
+          },
+          (error) => {
+            console.error(
+              'ZIVA Firebase SOS listener error:',
+              error
+            )
+          }
         )
 
-        const medical = clamp(
-          incident.medicalRequests * 10,
-        )
+      return () => {
+        unsubscribe()
+      }
 
-        /*
-         * The existing incident dataset does not yet
-         * expose a formal vulnerability field.
-         *
-         * We therefore use trapped + medical cases as
-         * operational vulnerability proxies for the
-         * prototype instead of inventing data.
-         */
+    }, [])
 
-        const vulnerability =
-          clamp(
-            trapped * 0.6 +
-              medical * 0.4,
-          )
 
-        /*
-         * Confidence uncertainty slightly increases
-         * operational attention, but never dominates
-         * severity.
-         */
+    /* =======================================================
+       DERIVED INCIDENTS
+       ======================================================= */
 
-        const confidencePenalty = clamp(
-          100 -
-            incident.confidenceScore,
-        )
-
-        /*
-         * Existing priority engine remains the baseline.
-         * The breakdown provides explainability around it.
-         */
-        const calculated =
-          severity * 0.35 +
-          affectedPeople * 0.15 +
-          vulnerability * 0.20 +
-          confidencePenalty * 0.10 +
-          incident.priorityScore * 0.20
-
-        const score = Math.round(
-          clamp(calculated),
-        )
-
-        return {
-          score,
-          severity,
-          affectedPeople,
-          trapped,
-          medical,
-          waiting: 0,
-          confidencePenalty,
-          band: getPriorityBand(score),
-        }
-      },
-      [incidents],
-    )
-
-  /* =======================================================
-     RECOMMENDED RESOURCE
-     ======================================================= */
-
-  const getRecommendedResource =
-    useCallback(
-      (incidentId: string) => {
-        const incident =
-          getIncident(incidentId)
-
-        if (!incident) return undefined
-
-        return recommendResource(
-          incident,
-          resources,
-        )
-      },
-      [getIncident, resources],
-    )
-
-  /* =======================================================
-     RECOMMENDED ROUTE
-     ======================================================= */
-
-  const getRecommendedRoute =
-    useCallback(
-      (incidentId: string) => {
-        return recommendRoute(
-          getRoutesForIncident(
-            incidentId,
+    const incidents =
+      useMemo(
+        () =>
+          deriveAllIncidents(
+            incidentsRaw,
+            reports
           ),
-        )
-      },
-      [getRoutesForIncident],
-    )
+        [
+          incidentsRaw,
+          reports
+        ]
+      )
 
-  /* =======================================================
-     RESOURCE EXPLANATION
-     ======================================================= */
 
-  const getResourceExplanation =
-    useCallback(
-      (incidentId: string) => {
-        const incident =
-          getIncident(incidentId)
+    /* =======================================================
+       GETTERS
+       ======================================================= */
 
-        const resource =
-          getRecommendedResource(
-            incidentId,
-          )
+    const getIncident =
+      useCallback(
+        (id: string) =>
+          incidents.find(
+            (i) => i.id === id
+          ),
+        [incidents]
+      )
 
-        if (!incident || !resource) {
-          return ''
-        }
 
-        return explainResourceRecommendation(
-          incident,
-          resource,
-        )
-      },
-      [
-        getIncident,
-        getRecommendedResource,
-      ],
-    )
-
-  /* =======================================================
-     RESOURCE OPERATIONAL STATE
-     ======================================================= */
-
-  const getResourceOperationalState =
-    useCallback(
-      (
-        resourceId: string,
-        incidentId?: string,
-      ): ResourceOperationalState | undefined => {
-        const resource =
-          resources.find(
-            (item) =>
-              item.id === resourceId,
-          )
-
-        if (!resource) {
-          return undefined
-        }
-
-        const freshness =
-          calculateFreshness(
-            resource.lastUpdate,
-          )
-
-        let distanceKm = 0
-        let accessibility:
-          | 'ACCESSIBLE'
-          | 'RESTRICTED'
-          | 'BLOCKED'
-          | 'UNKNOWN' =
-          'UNKNOWN'
-
-        let suitabilityScore = 0
-
-        const reasons: string[] = []
-
-        /*
-         * Location fit.
-         */
-
-        if (incidentId) {
-          const incident =
-            getIncident(incidentId)
-
-          if (incident) {
-            distanceKm =
-              haversineKm(
-                incident.position.lat,
-                incident.position.lng,
-                resource.position.lat,
-                resource.position.lng,
-              )
-
-            /*
-             * Current resource dataset does not contain a
-             * dedicated accessibility field.
-             *
-             * We therefore derive only what is supported:
-             * incident road access + route information.
-             */
-
-            const route =
-              getRecommendedRoute(
-                incidentId,
-              )
-
-            if (
-              incident.roadAccess ===
-              'BLOCKED'
-            ) {
-              accessibility =
-                'BLOCKED'
-            } else if (
-              route?.risk === 'HIGH'
-            ) {
-              accessibility =
-                'RESTRICTED'
-            } else if (route) {
-              accessibility =
-                'ACCESSIBLE'
-            }
-
-            const distanceScore =
-              clamp(
-                100 -
-                  distanceKm * 8,
-              )
-
-            const statusScore =
-              resource.status ===
-              'AVAILABLE'
-                ? 100
-                : resource.status ===
-                    'EN_ROUTE'
-                  ? 75
-                  : 30
-
-            const freshnessScore =
-              freshness.score
-
-            suitabilityScore =
-              Math.round(
-                distanceScore * 0.30 +
-                  statusScore * 0.25 +
-                  freshnessScore *
-                    0.25 +
-                  (accessibility ===
-                  'ACCESSIBLE'
-                    ? 100
-                    : accessibility ===
-                        'RESTRICTED'
-                      ? 55
-                      : accessibility ===
-                          'BLOCKED'
-                        ? 10
-                        : 40) *
-                    0.20,
-              )
-
-            if (
-              distanceKm <= 5
-            ) {
-              reasons.push(
-                'Within operational range',
-              )
-            }
-
-            if (
-              resource.status ===
-              'AVAILABLE'
-            ) {
-              reasons.push(
-                'Currently available',
-              )
-            }
-
-            if (
-              freshness.state ===
-              'CURRENT'
-            ) {
-              reasons.push(
-                'Recently updated',
-              )
-            } else if (
-              freshness.state ===
-                'STALE' ||
-              freshness.state ===
-                'OUTDATED'
-            ) {
-              reasons.push(
-                'Information needs review',
-              )
-            }
-
-            if (
-              accessibility ===
-              'BLOCKED'
-            ) {
-              reasons.push(
-                'Current road access is blocked',
-              )
-            } else if (
-              accessibility ===
-              'RESTRICTED'
-            ) {
-              reasons.push(
-                'Route has elevated risk',
-              )
-            }
-          }
-        }
-
-        const recommended =
-          incidentId
-            ? getRecommendedResource(
-                incidentId,
-              )?.id === resource.id
-            : false
-
-        return {
-          resource,
-          distanceKm,
-          freshnessScore:
-            freshness.score,
-          freshnessLabel:
-            freshness.label,
-          trustScore: freshness.score,
-          accessibility,
-          suitabilityScore,
-          recommended,
-          reasons,
-        }
-      },
-      [
-        resources,
-        getIncident,
-        getRecommendedRoute,
-        getRecommendedResource,
-      ],
-    )
-
-  /* =======================================================
-     MATCHING ENGINE
-     ======================================================= */
-
-  const getMatchingResources =
-    useCallback(
-      (
-        incidentId: string,
-      ): ResourceOperationalState[] => {
-        const incident =
-          getIncident(incidentId)
-
-        if (!incident) {
-          return []
-        }
-
-        /*
-         * Candidate narrowing:
-         *
-         * ALL resources
-         *       ↓
-         * usable status
-         *       ↓
-         * not outdated
-         *       ↓
-         * operational scoring
-         *       ↓
-         * top candidates
-         *
-         * This mirrors the ZIVA matching strategy rather
-         * than blindly choosing the nearest resource.
-         */
-
-        return resources
-          .filter(
-            (resource) =>
-              resource.status !==
-                'UNAVAILABLE' &&
-              resource.status !==
-                'FULL',
-          )
-          .map(
-            (resource) =>
-              getResourceOperationalState(
-                resource.id,
-                incidentId,
-              ),
-          )
-          .filter(
-            (
-              value,
-            ): value is ResourceOperationalState =>
-              Boolean(value),
-          )
-          .filter(
-            (item) =>
-              item.accessibility !==
-              'BLOCKED',
-          )
-          .sort(
-            (a, b) =>
-              b.suitabilityScore -
-              a.suitabilityScore,
-          )
-          .slice(0, 8)
-      },
-      [
-        resources,
-        getIncident,
-        getResourceOperationalState,
-      ],
-    )
-
-  /* =======================================================
-     RESOURCE FRESHNESS API
-     ======================================================= */
-
-  const getResourceFreshness =
-    useCallback(
-      (resourceId: string) => {
-        const resource =
-          resources.find(
-            (item) =>
-              item.id === resourceId,
-          )
-
-        if (!resource) {
-          return undefined
-        }
-
-        return calculateFreshness(
-          resource.lastUpdate,
-        )
-      },
-      [resources],
-    )
-
-  /* =======================================================
-     INCIDENT TRUST API
-     ======================================================= */
-
-  const getIncidentTrust =
-    useCallback(
-      (incidentId: string) => {
-        const incident =
-          getIncident(incidentId)
-
-        if (!incident) {
-          return undefined
-        }
-
-        const incidentReports =
-          getReportsForIncident(
-            incidentId,
-          )
-
-        const corroborated =
-          incidentReports.reduce(
-            (total, report) =>
-              total +
-              report.corroboratingReports,
-            0,
-          )
-
-        const conflicting =
-          incidentReports.reduce(
-            (total, report) =>
-              total +
-              report.conflictingReports,
-            0,
-          )
-
-        let state:
-          | 'HIGH_CONFIDENCE'
-          | 'MODERATE_CONFIDENCE'
-          | 'LOW_CONFIDENCE'
-          | 'CONFLICTING'
-
-        if (conflicting > 0) {
-          state = 'CONFLICTING'
-        } else if (
-          incident.confidenceScore >=
-          85
-        ) {
-          state = 'HIGH_CONFIDENCE'
-        } else if (
-          incident.confidenceScore >=
-          65
-        ) {
-          state = 'MODERATE_CONFIDENCE'
-        } else {
-          state = 'LOW_CONFIDENCE'
-        }
-
-        return {
-          confidence:
-            incident.confidenceScore,
-          reportCount:
-            incidentReports.length,
-          corroborated,
-          conflicting,
-          state,
-        }
-      },
-      [
-        getIncident,
-        getReportsForIncident,
-      ],
-    )
-
-  /* =======================================================
-     CONFLICT ENGINE
-     ======================================================= */
-
-  const conflicts = useMemo(() => {
-    const records: ConflictRecord[] =
-      []
-
-    incidents.forEach(
-      (incident) => {
-        const incidentReports =
+    const getReportsForIncident =
+      useCallback(
+        (id: string) =>
           reports.filter(
-            (report) =>
-              report.incidentId ===
-              incident.id,
-          )
-
-        const conflictingReports =
-          incidentReports.filter(
-            (report) =>
-              report.conflictingReports >
-              0 ||
-              report.status ===
-                'CONFLICTING',
-          )
-
-        if (
-          conflictingReports.length >
-          0
-        ) {
-          records.push({
-            id: `CON-${incident.id}`,
-            incidentId:
-              incident.id,
-            title:
-              incident.name,
-            reports:
-              incidentReports,
-            status:
-              incident.status ===
-              'VERIFICATION_NEEDED'
-                ? 'OPEN'
-                : 'RESOLVED',
-          })
-        }
-      },
-    )
-
-    return records
-  }, [incidents, reports])
-
-  const getConflicts =
-    useCallback(
-      () => conflicts,
-      [conflicts],
-    )
-
-  /* =======================================================
-     RELIEF GAP ENGINE
-     ======================================================= */
-
-  const reliefGaps = useMemo(() => {
-    const demandByType =
-      new Map<string, number>()
-
-    const supplyByType =
-      new Map<string, number>()
-
-    /*
-     * Demand is represented by affected people
-     * associated with each reported need category.
-     */
-
-    incidents.forEach(
-      (incident) => {
-        const type =
-          incident.typeLabel
-
-        demandByType.set(
-          type,
-          (demandByType.get(type) ??
-            0) +
-            incident.affectedPeople,
-        )
-      },
-    )
-
-    /*
-     * The current DRISHTI resource model does not yet
-     * expose a quantity/capacity field.
-     *
-     * We therefore count operational resources rather
-     * than inventing quantities.
-     *
-     * The Firebase schema will later replace this with
-     * availableQuantity / capacity.
-     */
-
-    resources.forEach(
-      (resource) => {
-        const type =
-          resource.typeLabel
-
-        if (
-          resource.status ===
-            'UNAVAILABLE' ||
-          resource.status ===
-            'FULL'
-        ) {
-          return
-        }
-
-        supplyByType.set(
-          type,
-          (supplyByType.get(type) ??
-            0) + 1,
-        )
-      },
-    )
-
-    const types = new Set([
-      ...demandByType.keys(),
-      ...supplyByType.keys(),
-    ])
-
-    return Array.from(types)
-      .map((type) => {
-        const demand =
-          demandByType.get(type) ??
-          0
-
-        const supply =
-          supplyByType.get(type) ??
-          0
-
-        const gap = Math.max(
-          demand - supply,
-          0,
-        )
-
-        const gapRate =
-          demand > 0
-            ? gap / demand
-            : 0
-
-        return {
-          type,
-          demand,
-          supply,
-          gap,
-          gapRate,
-        }
-      })
-      .filter(
-        (gap) =>
-          gap.demand > 0,
+            (r) =>
+              r.incidentId === id
+          ),
+        [reports]
       )
-      .sort(
-        (a, b) =>
-          b.gapRate -
-          a.gapRate,
+
+
+    const getRoutesForIncident =
+      useCallback(
+        (id: string) =>
+          routes.filter(
+            (r) =>
+              r.incidentId === id
+          ),
+        [routes]
       )
-  }, [incidents, resources])
 
-  const getReliefGaps =
-    useCallback(
-      () => reliefGaps,
-      [reliefGaps],
-    )
 
-  /* =======================================================
-     DISPATCH
-     ======================================================= */
-
-  const dispatchResource =
-    useCallback(
-      (
-        incidentId: string,
-        resourceId: string,
-        routeId?: string,
-      ): Assignment => {
-        const incident =
-          incidentsRaw.find(
-            (item) =>
-              item.id === incidentId,
-          )
-
-        const resource =
+    const getResource =
+      useCallback(
+        (id: string) =>
           resources.find(
-            (item) =>
-              item.id === resourceId,
-          )
-
-        if (!incident) {
-          throw new Error(
-            'Incident not found',
-          )
-        }
-
-        if (!resource) {
-          throw new Error(
-            'Resource not found',
-          )
-        }
-
-        const routeOpt =
-          routeId
-            ? routes.find(
-                (route) =>
-                  route.id ===
-                  routeId,
-              )
-            : undefined
-
-        const eta =
-          routeOpt?.etaMinutes ??
-          21
-
-        const dispatchedAt =
-          new Date().toLocaleTimeString(
-            'en-IN',
-            {
-              hour: '2-digit',
-              minute: '2-digit',
-            },
-          )
-
-        const assignment: Assignment = {
-          id: `AS-${idCounter++}`,
-          incidentId,
-          resourceId,
-          routeId,
-          status: 'EN_ROUTE',
-          dispatchedAt,
-          etaMinutes: eta,
-          reason:
-            explainResourceRecommendation(
-              incident,
-              resource,
-            ),
-        }
-
-        setAssignments(
-          (previous) => [
-            assignment,
-            ...previous,
-          ],
-        )
-
-        setResources(
-          (previous) =>
-            previous.map(
-              (item) =>
-                item.id ===
-                resourceId
-                  ? {
-                      ...item,
-                      status:
-                        'EN_ROUTE',
-                      destinationIncidentId:
-                        incidentId,
-                      etaMinutes:
-                        eta,
-                      lastUpdate:
-                        dispatchedAt,
-                    }
-                  : item,
-            ),
-        )
-
-        setIncidentsRaw(
-          (previous) =>
-            previous.map(
-              (item) =>
-                item.id ===
-                incidentId
-                  ? {
-                      ...item,
-                      status:
-                        'EN_ROUTE',
-                      assignedResourceIds:
-                        item.assignedResourceIds.includes(
-                          resourceId,
-                        )
-                          ? item.assignedResourceIds
-                          : [
-                              ...item.assignedResourceIds,
-                              resourceId,
-                            ],
-                      updatedAt:
-                        new Date().toISOString(),
-                    }
-                  : item,
-            ),
-        )
-
-        return assignment
-      },
-      [
-        incidentsRaw,
-        resources,
-        routes,
-      ],
-    )
-
-  /* =======================================================
-     FIELD UPDATE
-     ======================================================= */
-
-  const addFieldUpdate =
-    useCallback(
-      (
-        update: Omit<
-          FieldUpdate,
-          'id'
-        >,
-      ) => {
-        setFieldUpdates(
-          (previous) => [
-            {
-              ...update,
-              id: `FU-${idCounter++}`,
-            },
-            ...previous,
-          ],
-        )
-
-        /*
-         * A field update means the incident has changed.
-         * This timestamp is important for freshness.
-         */
-
-        setIncidentsRaw(
-          (previous) =>
-            previous.map(
-              (incident) =>
-                incident.id ===
-                update.incidentId
-                  ? {
-                      ...incident,
-                      updatedAt:
-                        new Date().toISOString(),
-                    }
-                  : incident,
-            ),
-        )
-      },
-      [],
-    )
-
-  /* =======================================================
-     VERIFICATION ASSIGNMENT
-     ======================================================= */
-
-  const assignVerificationTeam =
-    useCallback(
-      (
-        incidentId: string,
-        teamResourceId: string,
-      ) => {
-        const incident =
-          incidentsRaw.find(
-            (item) =>
-              item.id === incidentId,
-          )
-
-        if (!incident) {
-          return
-        }
-
-        const verification: Verification =
-          {
-            id: `VER-${idCounter++}`,
-            incidentId,
-            location:
-              incident.name,
-            confidenceBefore:
-              incident.confidenceScore,
-            fogBefore:
-              incident.informationFog,
-            assignedTeamId:
-              teamResourceId,
-            status: 'ASSIGNED',
-          }
-
-        setVerifications(
-          (previous) => [
-            verification,
-            ...previous,
-          ],
-        )
-
-        setResources(
-          (previous) =>
-            previous.map(
-              (resource) =>
-                resource.id ===
-                teamResourceId
-                  ? {
-                      ...resource,
-                      status:
-                        'EN_ROUTE',
-                      destinationIncidentId:
-                        incidentId,
-                      etaMinutes: 25,
-                    }
-                  : resource,
-            ),
-        )
-
-        /*
-         * Explicitly move the incident into the
-         * verification workflow.
-         */
-
-        setIncidentsRaw(
-          (previous) =>
-            previous.map(
-              (item) =>
-                item.id ===
-                incidentId
-                  ? {
-                      ...item,
-                      status:
-                        'VERIFICATION_NEEDED',
-                      updatedAt:
-                        new Date().toISOString(),
-                    }
-                  : item,
-            ),
-        )
-      },
-      [incidentsRaw],
-    )
-
-  /* =======================================================
-     VERIFICATION SUBMISSION
-     ======================================================= */
-
-  const submitVerification =
-    useCallback(
-      (
-        incidentId: string,
-        data: {
-          affectedPeople: number
-          trappedPeople: number
-          medicalRequests: number
-          roadAccess:
-            | 'OPEN'
-            | 'PARTIAL'
-            | 'BLOCKED'
-        },
-      ) => {
-        const incident =
-          incidentsRaw.find(
-            (item) =>
-              item.id === incidentId,
-          )
-
-        if (!incident) {
-          return
-        }
-
-        const newReportId =
-          `R-${idCounter++}`
-
-        const timestamp =
-          new Date().toLocaleTimeString(
-            'en-IN',
-            {
-              hour: '2-digit',
-              minute: '2-digit',
-            },
-          )
-
-        /*
-         * Field verification becomes a new piece of
-         * evidence rather than silently overwriting the
-         * old reports.
-         */
-
-        const verifiedReport:
-          Report = {
-            id: newReportId,
-            incidentId,
-            source: 'FIELD_TEAM',
-            location:
-              incident.name,
-            content:
-              `Field verification complete. ${data.affectedPeople} affected, ${data.trappedPeople} trapped, ${data.medicalRequests} medical cases. Road ${data.roadAccess}.`,
-            credibility: 'HIGH',
-            confidence: 93,
-            timestamp,
-            status: 'VERIFIED',
-            corroboratingReports: 3,
-            conflictingReports: 0,
-          }
-
-        setReports(
-          (previous) => [
-            verifiedReport,
-            ...previous,
-          ],
-        )
-
-        setIncidentsRaw(
-          (previous) =>
-            previous.map(
-              (item) =>
-                item.id ===
-                incidentId
-                  ? {
-                      ...item,
-                      affectedPeople:
-                        data.affectedPeople,
-                      trappedPeople:
-                        data.trappedPeople,
-                      medicalRequests:
-                        data.medicalRequests,
-                      roadAccess:
-                        data.roadAccess,
-                      status:
-                        'AWAITING_DISPATCH',
-                      reportIds: [
-                        ...item.reportIds,
-                        newReportId,
-                      ],
-                      lastVerified:
-                        'just now',
-                      updatedAt:
-                        new Date().toISOString(),
-                    }
-                  : item,
-            ),
-        )
-
-        setVerifications(
-          (previous) =>
-            previous.map(
-              (verification) =>
-                verification.incidentId ===
-                  incidentId &&
-                verification.status ===
-                  'ASSIGNED'
-                  ? {
-                      ...verification,
-                      status:
-                        'COMPLETE',
-                      confidenceAfter: 93,
-                      fogAfter: 7,
-                      submittedData:
-                        data,
-                    }
-                  : verification,
-            ),
-        )
-      },
-      [incidentsRaw],
-    )
-
-  /* =======================================================
-     ALERT ENGINE
-     ======================================================= */
-
-  const alerts: AlertItem[] =
-    useMemo(() => {
-      const items: AlertItem[] =
-        []
-
-      incidents.forEach(
-        (incident) => {
-          /*
-           * CRITICAL + TRAPPED
-           */
-
-          if (
-            incident.severity ===
-              'CRITICAL' &&
-            incident.trappedPeople >
-              0
-          ) {
-            items.push({
-              id: `alert-${incident.id}-trapped`,
-              level: 'CRITICAL',
-              title:
-                incident.name,
-              message:
-                `${incident.trappedPeople} people potentially trapped.`,
-              incidentId:
-                incident.id,
-              timestamp:
-                incident.updatedAt,
-            })
-
-            return
-          }
-
-          /*
-           * Verification uncertainty.
-           */
-
-          if (
-            incident.status ===
-              'VERIFICATION_NEEDED' ||
-            incident.confidenceScore <
-              70
-          ) {
-            items.push({
-              id: `alert-${incident.id}-verification`,
-              level:
-                'VERIFICATION_REQUIRED',
-              title:
-                incident.name,
-              message:
-                'Information confidence is low or requires verification.',
-              incidentId:
-                incident.id,
-              timestamp:
-                incident.updatedAt,
-            })
-
-            return
-          }
-
-          /*
-           * Blocked access.
-           */
-
-          if (
-            incident.roadAccess ===
-            'BLOCKED'
-          ) {
-            items.push({
-              id: `alert-${incident.id}-road`,
-              level: 'WARNING',
-              title:
-                incident.name,
-              message:
-                'Road access is blocked in the affected area.',
-              incidentId:
-                incident.id,
-              timestamp:
-                incident.updatedAt,
-            })
-
-            return
-          }
-
-          /*
-           * Critical request.
-           */
-
-          if (
-            incident.severity ===
-            'CRITICAL'
-          ) {
-            items.push({
-              id: `alert-${incident.id}`,
-              level: 'HIGH',
-              title:
-                incident.name,
-              message:
-                incident.description
-                  .split('.')[0] +
-                '.',
-              incidentId:
-                incident.id,
-              timestamp:
-                incident.updatedAt,
-            })
-          }
-        },
+            (r) => r.id === id
+          ),
+        [resources]
       )
 
-      return items
-    }, [incidents])
 
-  /* =======================================================
-     CONTEXT VALUE
-     ======================================================= */
+    /* =======================================================
+       INTELLIGENCE
+       ======================================================= */
 
-  const value: DataContextValue =
-    {
+    const getRecommendedResource =
+      useCallback(
+        (incidentId: string) => {
+
+          const incident =
+            getIncident(
+              incidentId
+            )
+
+          if (!incident) {
+            return undefined
+          }
+
+          return recommendResource(
+            incident,
+            resources
+          )
+
+        },
+        [
+          getIncident,
+          resources
+        ]
+      )
+
+
+    const getRecommendedRoute =
+      useCallback(
+        (incidentId: string) =>
+          recommendRoute(
+            getRoutesForIncident(
+              incidentId
+            )
+          ),
+        [
+          getRoutesForIncident
+        ]
+      )
+
+
+    const getResourceExplanation =
+      useCallback(
+        (incidentId: string) => {
+
+          const incident =
+            getIncident(
+              incidentId
+            )
+
+          const resource =
+            getRecommendedResource(
+              incidentId
+            )
+
+          if (
+            !incident ||
+            !resource
+          ) {
+            return ''
+          }
+
+          return explainResourceRecommendation(
+            incident,
+            resource
+          )
+
+        },
+        [
+          getIncident,
+          getRecommendedResource
+        ]
+      )
+
+
+    /* =======================================================
+       DISPATCH RESOURCE
+       ======================================================= */
+
+    const dispatchResource =
+      useCallback(
+        (
+          incidentId: string,
+          resourceId: string,
+          routeId?: string
+        ): Assignment => {
+
+          const incident =
+            incidentsRaw.find(
+              (i) =>
+                i.id === incidentId
+            )
+
+          const routeOpt =
+            routeId
+              ? routes.find(
+                  (r) =>
+                    r.id === routeId
+                )
+              : undefined
+
+          const eta =
+            routeOpt?.etaMinutes ??
+            21
+
+          const assignment:
+            Assignment = {
+
+            id:
+              `AS-${idCounter++}`,
+
+            incidentId,
+
+            resourceId,
+
+            routeId,
+
+            status:
+              'EN_ROUTE',
+
+            dispatchedAt:
+              new Date().toLocaleTimeString(
+                'en-IN',
+                {
+                  hour: '2-digit',
+                  minute: '2-digit'
+                }
+              ),
+
+            etaMinutes:
+              eta,
+
+            reason:
+              incident
+                ? explainResourceRecommendation(
+                    incident,
+                    resources.find(
+                      (r) =>
+                        r.id === resourceId
+                    ) as Resource
+                  )
+                : ''
+          }
+
+
+          setAssignments(
+            (prev) => [
+              assignment,
+              ...prev
+            ]
+          )
+
+
+          setResources(
+            (prev) =>
+              prev.map(
+                (r) =>
+                  r.id === resourceId
+                    ? {
+                        ...r,
+
+                        status:
+                          'EN_ROUTE',
+
+                        destinationIncidentId:
+                          incidentId,
+
+                        etaMinutes:
+                          eta,
+
+                        lastUpdate:
+                          assignment.dispatchedAt
+                      }
+                    : r
+              )
+          )
+
+
+          setIncidentsRaw(
+            (prev) =>
+              prev.map(
+                (i) =>
+                  i.id === incidentId
+                    ? {
+                        ...i,
+
+                        status:
+                          'EN_ROUTE',
+
+                        assignedResourceIds:
+                          [
+                            ...i.assignedResourceIds,
+                            resourceId
+                          ],
+
+                        updatedAt:
+                          new Date().toISOString()
+                      }
+                    : i
+              )
+          )
+
+
+          return assignment
+
+        },
+        [
+          incidentsRaw,
+          resources,
+          routes
+        ]
+      )
+
+
+    /* =======================================================
+       FIELD UPDATE
+       ======================================================= */
+
+    const addFieldUpdate =
+      useCallback(
+        (
+          update:
+            Omit<FieldUpdate, 'id'>
+        ) => {
+
+          setFieldUpdates(
+            (prev) => [
+              {
+                ...update,
+                id:
+                  `fu-${idCounter++}`
+              },
+              ...prev
+            ]
+          )
+
+        },
+        []
+      )
+
+
+    /* =======================================================
+       ASSIGN VERIFICATION TEAM
+       ======================================================= */
+
+    const assignVerificationTeam =
+      useCallback(
+        (
+          incidentId: string,
+          teamResourceId: string
+        ) => {
+
+          const incident =
+            incidentsRaw.find(
+              (i) =>
+                i.id === incidentId
+            )
+
+          if (!incident) {
+            return
+          }
+
+
+          setVerifications(
+            (prev) => [
+              {
+                id:
+                  `VER-${idCounter++}`,
+
+                incidentId,
+
+                location:
+                  incident.name,
+
+                confidenceBefore:
+                  incident.confidenceScore,
+
+                fogBefore:
+                  incident.informationFog,
+
+                assignedTeamId:
+                  teamResourceId,
+
+                status:
+                  'ASSIGNED'
+              },
+
+              ...prev
+            ]
+          )
+
+
+          setResources(
+            (prev) =>
+              prev.map(
+                (r) =>
+                  r.id === teamResourceId
+                    ? {
+                        ...r,
+
+                        status:
+                          'EN_ROUTE',
+
+                        destinationIncidentId:
+                          incidentId,
+
+                        etaMinutes:
+                          25
+                      }
+                    : r
+              )
+          )
+
+        },
+        [
+          incidentsRaw
+        ]
+      )
+
+
+    /* =======================================================
+       SUBMIT VERIFICATION
+       ======================================================= */
+
+    const submitVerification =
+      useCallback(
+        (
+          incidentId: string,
+          data: {
+            affectedPeople: number
+            trappedPeople: number
+            medicalRequests: number
+            roadAccess:
+              | 'OPEN'
+              | 'PARTIAL'
+              | 'BLOCKED'
+          }
+        ) => {
+
+          const newReportId =
+            `R-${idCounter++}`
+
+          const incident =
+            incidentsRaw.find(
+              (i) =>
+                i.id === incidentId
+            )
+
+
+          setReports(
+            (prev) => [
+              ...prev,
+
+              {
+                id:
+                  newReportId,
+
+                incidentId,
+
+                source:
+                  'FIELD_TEAM',
+
+                location:
+                  incident?.name ?? '',
+
+                content:
+                  `Field verification complete. ${data.affectedPeople} affected, ${data.trappedPeople} trapped, ${data.medicalRequests} medical cases. Road ${data.roadAccess}.`,
+
+                credibility:
+                  'HIGH',
+
+                confidence:
+                  93,
+
+                timestamp:
+                  new Date().toLocaleTimeString(
+                    'en-IN',
+                    {
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    }
+                  ),
+
+                status:
+                  'VERIFIED',
+
+                corroboratingReports:
+                  3,
+
+                conflictingReports:
+                  0
+              }
+            ]
+          )
+
+
+          setIncidentsRaw(
+            (prev) =>
+              prev.map(
+                (i) =>
+                  i.id === incidentId
+                    ? {
+                        ...i,
+
+                        affectedPeople:
+                          data.affectedPeople,
+
+                        trappedPeople:
+                          data.trappedPeople,
+
+                        medicalRequests:
+                          data.medicalRequests,
+
+                        roadAccess:
+                          data.roadAccess,
+
+                        status:
+                          'AWAITING_DISPATCH',
+
+                        reportIds:
+                          [
+                            ...i.reportIds,
+                            newReportId
+                          ],
+
+                        lastVerified:
+                          'just now',
+
+                        updatedAt:
+                          new Date().toISOString()
+                      }
+                    : i
+              )
+          )
+
+
+          setVerifications(
+            (prev) =>
+              prev.map(
+                (v) =>
+                  v.incidentId === incidentId &&
+                  v.status === 'ASSIGNED'
+                    ? {
+                        ...v,
+
+                        status:
+                          'COMPLETE',
+
+                        confidenceAfter:
+                          88,
+
+                        fogAfter:
+                          19,
+
+                        submittedData:
+                          data
+                      }
+                    : v
+              )
+          )
+
+        },
+        [
+          incidentsRaw
+        ]
+      )
+
+
+    /* =======================================================
+       ALERT ENGINE
+       ======================================================= */
+
+    const alerts:
+      AlertItem[] =
+      useMemo(
+        () => {
+
+          const items:
+            AlertItem[] = []
+
+
+          incidents.forEach(
+            (inc) => {
+
+              if (
+                inc.severity ===
+                  'CRITICAL' &&
+                inc.trappedPeople >
+                  0
+              ) {
+
+                items.push({
+                  id:
+                    `alert-${inc.id}`,
+
+                  level:
+                    'CRITICAL',
+
+                  title:
+                    inc.name,
+
+                  message:
+                    `${inc.trappedPeople} people potentially trapped.`,
+
+                  incidentId:
+                    inc.id,
+
+                  requestId:
+                    inc.requestId,
+
+                  timestamp:
+                    inc.updatedAt
+                })
+
+              } else if (
+                inc.severity ===
+                'CRITICAL'
+              ) {
+
+                items.push({
+                  id:
+                    `alert-${inc.id}`,
+
+                  level:
+                    'HIGH',
+
+                  title:
+                    inc.name,
+
+                  message:
+                    inc.description
+                      .split('.')[0] +
+                    '.',
+
+                  incidentId:
+                    inc.id,
+
+                  requestId:
+                    inc.requestId,
+
+                  timestamp:
+                    inc.updatedAt
+                })
+
+              } else if (
+                inc.status ===
+                'VERIFICATION_NEEDED'
+              ) {
+
+                items.push({
+                  id:
+                    `alert-${inc.id}`,
+
+                  level:
+                    'VERIFICATION_REQUIRED',
+
+                  title:
+                    inc.name,
+
+                  message:
+                    'Conflicting reports require field verification.',
+
+                  incidentId:
+                    inc.id,
+
+                  requestId:
+                    inc.requestId,
+
+                  timestamp:
+                    inc.updatedAt
+                })
+
+              } else if (
+                inc.roadAccess ===
+                'BLOCKED'
+              ) {
+
+                items.push({
+                  id:
+                    `alert-${inc.id}`,
+
+                  level:
+                    'WARNING',
+
+                  title:
+                    inc.name,
+
+                  message:
+                    'Road access blocked in affected area.',
+
+                  incidentId:
+                    inc.id,
+
+                  requestId:
+                    inc.requestId,
+
+                  timestamp:
+                    inc.updatedAt
+                })
+              }
+            }
+          )
+
+
+          return items
+
+        },
+        [
+          incidents
+        ]
+      )
+
+
+    /* =======================================================
+       CONTEXT VALUE
+       ======================================================= */
+
+    const value:
+      DataContextValue = {
+
       incidents,
+
       reports,
+
       resources,
+
       routes,
+
       assignments,
+
       fieldUpdates,
+
       verifications,
+
       alerts,
 
       getIncident,
+
       getReportsForIncident,
+
       getRoutesForIncident,
+
       getResource,
 
-      getPriorityBreakdown,
-
       getRecommendedResource,
+
       getRecommendedRoute,
+
       getResourceExplanation,
 
-      getResourceOperationalState,
-      getMatchingResources,
-
-      getResourceFreshness,
-      getIncidentTrust,
-
-      getConflicts,
-
-      getReliefGaps,
-
       dispatchResource,
+
       addFieldUpdate,
+
       assignVerificationTeam,
-      submitVerification,
+
+      submitVerification
     }
 
-  return (
-    <DataContext.Provider
-      value={value}
-    >
-      {children}
-    </DataContext.Provider>
-  )
-}
+
+    return (
+      <DataContext.Provider
+        value={value}
+      >
+        {children}
+      </DataContext.Provider>
+    )
+  }
+
 
 /* =========================================================
    HOOK
    ========================================================= */
 
-export function useData(): DataContextValue {
-  const context =
-    useContext(DataContext)
+export function useData():
+  DataContextValue {
 
-  if (!context) {
+  const ctx =
+    useContext(
+      DataContext
+    )
+
+  if (!ctx) {
     throw new Error(
-      'useData must be used within DataProvider',
+      'useData must be used within DataProvider'
     )
   }
 
-  return context
+  return ctx
 }

@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────
-// DRISHTI Mock Intelligence Service
+// ZIVA Mock Intelligence Service
 //
 // Deterministic, explainable scoring functions that stand in for the real
 // AI/ML engine in this PoC. All UI pages consume these functions rather than

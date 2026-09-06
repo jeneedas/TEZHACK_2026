@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: 'drishti-admin',
+      name: 'ZIVA-admin',
       script: 'npx',
       args: 'vite --host 0.0.0.0 --port 3000',
       cwd: '/home/user/webapp',

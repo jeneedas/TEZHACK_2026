@@ -4,7 +4,7 @@
 // These models are shared by:
 // Citizen App → Firebase → Coordinator Portal
 //
-// The current coordinator prototype still contains some legacy DRISHTI
+// The current coordinator prototype still contains some legacy ZIVA
 // compatibility fields. They are retained temporarily so existing demo
 // data/services continue to work while the system is migrated.
 // ─────────────────────────────────────────────────────────────────────────
@@ -99,7 +99,7 @@ export type RequestStatus =
 
 
 /*
- * Legacy status values retained because the existing DRISHTI-derived
+ * Legacy status values retained because the existing ZIVA-derived
  * incident services still use them.
  */
 export type IncidentStatus =

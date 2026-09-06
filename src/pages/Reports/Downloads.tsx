@@ -25,7 +25,7 @@ export const Downloads: React.FC = () => {
   const [date, setDate] = useState('2026-08-30')
 
   const handleDownload = () => {
-    const csvContent = `Report Type,Date\n${selectedOption},${date}\n\nThis is demo export data generated for the DRISHTI PoC.`
+    const csvContent = `Report Type,Date\n${selectedOption},${date}\n\nThis is demo export data generated for the ZIVA PoC.`
     const blob = new Blob([csvContent], { type: 'text/csv' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')

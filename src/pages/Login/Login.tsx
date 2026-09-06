@@ -17,7 +17,7 @@ export const Login: React.FC = () => {
     <div className="flex min-h-screen items-center justify-center bg-bg px-4">
       <div className="w-full max-w-[420px]">
         <div className="mb-5 text-center">
-          <div className="text-2xl font-bold tracking-tight text-text-primary">DRISHTI</div>
+          <div className="text-2xl font-bold tracking-tight text-text-primary">ZIVA</div>
           <div className="mt-1 text-xs text-text-secondary">
             Disaster Response Intelligence &amp; Situation Tracking Interface
           </div>
@@ -60,7 +60,7 @@ export const Login: React.FC = () => {
         </div>
 
         <div className="mt-4 text-center text-[11px] text-text-secondary">
-          DRISHTI District Administration Portal · Kamrup District, Assam
+          ZIVA District Administration Portal · Kamrup District, Assam
         </div>
       </div>
     </div>
